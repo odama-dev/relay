@@ -16,7 +16,7 @@ export const env = {
   slackBotToken: process.env.SLACK_BOT_TOKEN ?? "",
   xenditSecretKey: process.env.XENDIT_SECRET_KEY ?? "",
   xenditCallbackToken: process.env.XENDIT_CALLBACK_TOKEN ?? "",
-  /** Bearer token the VPS cron presents to /api/cron/*. */
+  /** Bearer token the scheduler (Vercel Cron or the VPS cron) presents to /api/cron/*. */
   cronSecret: process.env.CRON_SECRET ?? "",
 };
 

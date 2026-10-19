@@ -4,7 +4,7 @@ import { env } from "@/lib/env";
 import { JOBS, runJob, type JobName } from "@/lib/jobs";
 
 /**
- * Scheduled job endpoint, called by the VPS cron with
+ * Scheduled job endpoint, called by Vercel Cron (vercel.json, UTC) or the VPS cron with
  * `Authorization: Bearer $CRON_SECRET` (docs/VPS_DEPLOY.md).
  */
 async function handle(request: NextRequest, { params }: { params: Promise<{ job: string }> }) {

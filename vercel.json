@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    { "path": "/api/cron/due-reminders", "schedule": "0 2 * * *" },
+    { "path": "/api/cron/time-reminders", "schedule": "0 10 * * 1-5" },
+    { "path": "/api/cron/oos-digest", "schedule": "30 10 * * *" },
+    { "path": "/api/cron/lock-timesheets", "schedule": "0 0 * * 1" },
+    { "path": "/api/cron/retainer-rollover", "schedule": "5 0 1 * *" },
+    { "path": "/api/cron/overdue-invoices", "schedule": "10 17 * * *" },
+    { "path": "/api/cron/budget-alerts", "schedule": "15 1 * * *" }
+  ]
+}

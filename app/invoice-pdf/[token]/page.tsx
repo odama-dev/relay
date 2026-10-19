@@ -7,7 +7,7 @@ import { InvoiceDocument, InvoicePrintStyles } from "@/components/invoice/invoic
 export const metadata: Metadata = { title: "Invoice", robots: { index: false } };
 export const dynamic = "force-dynamic";
 
-/** Bare paper for headless Chrome (lib/invoices/pdf.ts). The one-time token is the only way in. */
+/** Bare paper for headless Chrome (lib/invoices/pdf.ts). The short-lived signed token is the only way in. */
 export default async function InvoicePdfPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const grant = redeemPdfToken(token);
