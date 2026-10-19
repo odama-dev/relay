@@ -1,0 +1,2 @@
+name,kind,client_name,contract_type,currency,contract_value,pm_email,status,start_date,end_date,budget_hours,retainer_hours_per_month,rollover_mode,rollover_cap_hours,member_emails,notion_url,figma_url,drive_url,slack_channel
+Website Redesign,client,Acme Corp,fixed,USD,15000.50,pm@odama.io,active,2026-10-01,2026-12-31,320,,,,ana@odama.io;budi@odama.io,,,,#acme-website

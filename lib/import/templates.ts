@@ -1,0 +1,67 @@
+/** Column order of the CSV templates (PRD "Import CSV"). */
+export const IMPORT_COLUMNS = {
+  users: ["full_name", "email", "role", "employment_type", "is_admin"],
+  clients: [
+    "code",
+    "name",
+    "country",
+    "timezone",
+    "default_currency",
+    "billing_email",
+    "billing_address",
+    "notes",
+    "contact_name",
+    "contact_email",
+    "contact_title",
+  ],
+  projects: [
+    "name",
+    "kind",
+    "client_name",
+    "contract_type",
+    "currency",
+    "contract_value",
+    "pm_email",
+    "status",
+    "start_date",
+    "end_date",
+    "budget_hours",
+    "retainer_hours_per_month",
+    "rollover_mode",
+    "rollover_cap_hours",
+    "member_emails",
+    "notion_url",
+    "figma_url",
+    "drive_url",
+    "slack_channel",
+  ],
+} as const;
+
+export type ImportKind = keyof typeof IMPORT_COLUMNS;
+
+/** Example rows for the downloadable templates. */
+export const IMPORT_EXAMPLES: Record<ImportKind, string[]> = {
+  users: ["Ana Putri", "ana@odama.io", "designer_dev", "full_time", "false"],
+  clients: ["ACME", "Acme Corp", "United Kingdom", "Europe/London", "USD", "billing@acme.com", "1 King St, London", "", "Jane Doe", "jane@acme.com", "Head of Marketing"],
+  projects: [
+    "Website Redesign",
+    "client",
+    "Acme Corp",
+    "fixed",
+    "USD",
+    "15000.50",
+    "pm@odama.io",
+    "active",
+    "2026-10-01",
+    "2026-12-31",
+    "320",
+    "",
+    "",
+    "",
+    "ana@odama.io;budi@odama.io",
+    "",
+    "",
+    "",
+    "#acme-website",
+  ],
+};
