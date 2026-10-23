@@ -12,11 +12,12 @@ import { cn } from "@/lib/utils";
 
 const ORDER: DueBucket[] = ["overdue", "today", "this_week", "later", "none"];
 
-export function MyTasksView({ tasks, today }: { tasks: TaskRow[]; today: string }) {
+/** `viewParam` keeps the list / kanban choice in the URL (the dashboard uses its own, beside the calendar's `view`). */
+export function MyTasksView({ tasks, today, viewParam = "view" }: { tasks: TaskRow[]; today: string; viewParam?: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const view = (params.get("view") === "kanban" ? "kanban" : "list") as ViewMode;
+  const view = (params.get(viewParam) === "list" ? "list" : "kanban") as ViewMode;
   const openTaskId = params.get("task");
 
   const setParam = (patch: Record<string, string | null>) => {
@@ -38,7 +39,7 @@ export function MyTasksView({ tasks, today }: { tasks: TaskRow[]; today: string 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
-        <ViewToggle value={view} onChange={(v) => setParam({ view: v === "list" ? null : v })} options={LIST_KANBAN_OPTIONS} />
+        <ViewToggle value={view} onChange={(v) => setParam({ [viewParam]: v === "kanban" ? null : v })} options={LIST_KANBAN_OPTIONS} />
         <span className="text-muted-foreground text-body">
           <span className="tabular">{tasks.length}</span> open
         </span>

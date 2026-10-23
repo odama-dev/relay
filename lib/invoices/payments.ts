@@ -5,14 +5,23 @@ import { numOr0 } from "@/lib/money";
 import { notifyMany } from "@/lib/notify";
 import { formatMoney } from "@/lib/format";
 import { isoDate, todayIn } from "@/lib/time/pure";
-import { deriveInvoiceStatus, fromMinor, fxRateToIdr, toMinor } from "@/lib/invoices/pure";
+import { deriveInvoiceStatus, fromMinor, fxRateToIdr, PLATFORM_LABELS, toMinor } from "@/lib/invoices/pure";
 import type { XenditCallback } from "@/lib/xendit";
+import { rateToIdrOn } from "@/lib/fx";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function financeAndSales(invoiceCreatedBy: string | null): Promise<string[]> {
-  const finance = await prisma.profile.findMany({ where: { role: "finance", status: "active" }, select: { id: true } });
-  return [...finance.map((f) => f.id), ...(invoiceCreatedBy ? [invoiceCreatedBy] : [])];
+  return [...new Set([...(await financeTeam()), ...(invoiceCreatedBy ? [invoiceCreatedBy] : [])])];
+}
+
+/** Finance by role or by module (Phase 2) — whoever verifies payments. */
+async function financeTeam(): Promise<string[]> {
+  const rows = await prisma.profile.findMany({
+    where: { status: "active", OR: [{ role: "finance" }, { modules: { some: { module: "finance" } } }] },
+    select: { id: true },
+  });
+  return rows.map((r) => r.id);
 }
 
 /**
@@ -22,7 +31,11 @@ async function financeAndSales(invoiceCreatedBy: string | null): Promise<string[
 export async function refreshInvoice(invoiceId: string, today = todayIn()): Promise<{ status: string; becameOverdue: boolean }> {
   const inv = await prisma.invoice.findUniqueOrThrow({
     where: { id: invoiceId },
-    include: { payments: { select: { amount: true } }, paymentRequests: { select: { amount: true, status: true, dueDate: true } } },
+    include: {
+      payments: { select: { amount: true } },
+      paymentRequests: { select: { amount: true, status: true, dueDate: true } },
+      _count: { select: { proofs: { where: { status: "submitted" } } } },
+    },
   });
   const paid = fromMinor(
     inv.payments.reduce((s, p) => s + toMinor(numOr0(p.amount), inv.currency), 0),
@@ -35,6 +48,7 @@ export async function refreshInvoice(invoiceId: string, today = todayIn()): Prom
     inv.paymentRequests.map((r) => ({ amount: numOr0(r.amount), status: r.status, dueDate: isoDate(r.dueDate) })),
     today,
     inv.currency,
+    inv._count.proofs > 0,
   );
   await prisma.invoice.update({ where: { id: invoiceId }, data: { amountPaid: paid, status } });
   return { status, becameOverdue: status === "overdue" && inv.status !== "overdue" };
@@ -147,7 +161,7 @@ export async function matchPayment(paymentId: string, requestId: string, userId:
  */
 export async function checkOverdueInvoices(today = todayIn()): Promise<{ checked: number; notified: number }> {
   const open = await prisma.invoice.findMany({
-    where: { status: { in: ["sent", "partially_paid", "overdue"] } },
+    where: { status: { in: ["sent", "partially_paid", "overdue", "payment_submitted"] } },
     select: { id: true, number: true, billToName: true, currency: true, total: true, amountPaid: true, createdBy: true, overdueNotifiedAt: true },
   });
   let notified = 0;
@@ -167,4 +181,81 @@ export async function checkOverdueInvoices(today = todayIn()): Promise<{ checked
     notified++;
   }
   return { checked: open.length, notified };
+}
+
+// ---------------------------------------------------------------------------
+// Payment proofs (Phase 2 · M9): Sales uploads, Finance verifies. The callers
+// proved the permission under RLS (insert / update of payment_proofs).
+// ---------------------------------------------------------------------------
+
+/** After a proof is submitted: the invoice waits on Finance, who hear about it. */
+export async function proofSubmitted(proofId: string): Promise<void> {
+  const proof = await prisma.paymentProof.findUniqueOrThrow({
+    where: { id: proofId },
+    include: { invoice: { select: { id: true, number: true, billToName: true } }, submitter: { select: { fullName: true } } },
+  });
+  await refreshInvoice(proof.invoiceId);
+  const finance = (await financeTeam()).filter((id) => id !== proof.submittedBy);
+  await notifyMany(finance, "payment_proof_submitted", {
+    title: `Payment proof to verify: ${proof.invoice.number ?? "invoice"}`,
+    body: `${proof.submitter?.fullName ?? "Sales"} uploaded ${formatMoney(numOr0(proof.amount), proof.currency)} from ${proof.invoice.billToName} via ${PLATFORM_LABELS[proof.platform]}.`,
+    path: "/payments",
+    refId: proof.id,
+  });
+}
+
+/**
+ * A verified proof becomes a payment like a Xendit one: matched to its
+ * request (or the invoice), counted as revenue, with the IDR it was worth on
+ * the day it was paid.
+ */
+export async function proofVerified(proofId: string, verifiedBy: string): Promise<void> {
+  const proof = await prisma.paymentProof.findUniqueOrThrow({ where: { id: proofId } });
+  if (proof.paymentId) return;
+  const amount = numOr0(proof.amount);
+  const paidOn = isoDate(proof.paidOn);
+  // The rate Finance confirmed, else the reference / ECB rate on the day it was paid.
+  const rate = proof.fxRateToIdr !== null ? numOr0(proof.fxRateToIdr) : await rateToIdrOn(proof.currency, paidOn);
+  const payment = await prisma.payment.create({
+    data: {
+      externalId: `proof:${proof.id}`,
+      source: "proof",
+      amount,
+      currency: proof.currency,
+      paidAt: new Date(`${paidOn}T12:00:00+07:00`),
+      channel: PLATFORM_LABELS[proof.platform],
+      settlementAmountIdr: rate === null ? null : Math.round(amount * rate * 100) / 100,
+      fxRateToIdr: rate,
+      raw: { proofId: proof.id } as Prisma.InputJsonValue,
+    },
+  });
+  await prisma.paymentProof.update({ where: { id: proof.id }, data: { paymentId: payment.id } });
+  if (proof.paymentRequestId) {
+    await applyToRequest(payment.id, proof.paymentRequestId, verifiedBy);
+  } else {
+    await prisma.payment.update({ where: { id: payment.id }, data: { invoiceId: proof.invoiceId, matchedBy: verifiedBy, matchedAt: new Date() } });
+    await refreshInvoice(proof.invoiceId);
+  }
+  if (proof.submittedBy) {
+    await notifyMany([proof.submittedBy], "payment_proof_decided", {
+      title: "Payment proof verified",
+      body: `${formatMoney(amount, proof.currency)} is recorded as paid.`,
+      path: `/invoices/${proof.invoiceId}`,
+      refId: proof.id,
+    });
+  }
+}
+
+/** A rejected proof sends the invoice back to Sent (or Overdue) and tells Sales why. */
+export async function proofRejected(proofId: string): Promise<void> {
+  const proof = await prisma.paymentProof.findUniqueOrThrow({ where: { id: proofId }, include: { invoice: { select: { number: true } } } });
+  await refreshInvoice(proof.invoiceId);
+  if (proof.submittedBy) {
+    await notifyMany([proof.submittedBy], "payment_proof_decided", {
+      title: `Payment proof rejected: ${proof.invoice.number ?? "invoice"}`,
+      body: proof.reviewNote ?? undefined,
+      path: `/invoices/${proof.invoiceId}`,
+      refId: proof.id,
+    });
+  }
 }

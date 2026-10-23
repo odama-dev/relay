@@ -76,7 +76,8 @@ export function useKanbanDnd<S extends string, T extends Item<S>>({
     const res = await onMove(id, status, neighboursOf(next[status], id));
     if (!res.ok) {
       setDraft(null);
-      toast.error(res.error);
+      // An empty error is a move the user called off (e.g. closed a prompt).
+      if (res.error) toast.error(res.error);
     }
   }
 

@@ -43,6 +43,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <SettingsForm
                 initial={{
                   reminder_time: settings.reminder_time,
+                  sales_stale_days: settings.sales_stale_days,
                   workdays: settings.workdays,
                   default_alert_thresholds: settings.default_alert_thresholds,
                   currencies: settings.currencies as ("IDR" | "USD" | "EUR" | "SGD" | "AUD")[],

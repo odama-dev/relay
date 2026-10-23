@@ -1,5 +1,6 @@
 import { fromMinor, toMinor } from "@/lib/invoices/pure";
-import { addDays, parseIsoDate, type IsoDate } from "@/lib/time/pure";
+import { utilizationPct as metricUtilization } from "@/lib/metrics/pure";
+import { addDays, addMonths, monthStart, parseIsoDate, weekStart, type IsoDate } from "@/lib/time/pure";
 
 /**
  * Dashboard rules (PRD/OVERVIEW-SPEC.md §1.3) — pure, so every card reads the
@@ -72,4 +73,107 @@ export function greeting(time: string): string {
   if (hour < 15) return "Good afternoon";
   if (hour < 19) return "Good evening";
   return "Good night";
+}
+
+// ---------------------------------------------------------------------------
+// Designer & Developer KPI period
+// ---------------------------------------------------------------------------
+
+export const WORK_PERIODS = ["week", "month", "3m", "6m"] as const;
+export type WorkPeriodKind = (typeof WORK_PERIODS)[number];
+
+export const WORK_PERIOD_LABELS: Record<WorkPeriodKind, string> = { week: "This week", month: "This month", "3m": "Last 3 months", "6m": "Last 6 months" };
+/** How the change line names the comparison window. */
+export const WORK_PERIOD_PREVIOUS: Record<WorkPeriodKind, string> = { week: "last week", month: "last month", "3m": "previous 3 months", "6m": "previous 6 months" };
+
+export type WorkBucket = { start: IsoDate; end: IsoDate; label: string };
+export type WorkPeriod = { kind: WorkPeriodKind; start: IsoDate; end: IsoDate; prev: { start: IsoDate; end: IsoDate }; buckets: WorkBucket[] };
+
+const DAY = 86_400_000;
+const daysBetween = (a: IsoDate, b: IsoDate) => Math.round((parseIsoDate(b).getTime() - parseIsoDate(a).getTime()) / DAY);
+const fmt = (opts: Intl.DateTimeFormatOptions) => {
+  const f = new Intl.DateTimeFormat("en-GB", { ...opts, timeZone: "UTC" });
+  return (d: IsoDate) => f.format(parseIsoDate(d));
+};
+const weekday = fmt({ weekday: "short" });
+const dayMonth = fmt({ day: "numeric", month: "short" });
+const month = fmt({ month: "short" });
+
+/** `?period=` → a known period, else this week. */
+export function parseWorkPeriodKind(value: string | string[] | undefined): WorkPeriodKind {
+  return (WORK_PERIODS as readonly string[]).includes(typeof value === "string" ? value : "") ? (value as WorkPeriodKind) : "week";
+}
+
+/**
+ * The window a Designer & Developer's KPIs cover, up to today. The previous
+ * window is the same number of days from the start of the period before
+ * (this week so far vs last week so far), and the chart buckets are days for
+ * a week, weeks for a month, months beyond that.
+ */
+export function resolveWorkPeriod(kind: WorkPeriodKind, today: IsoDate): WorkPeriod {
+  let start: IsoDate;
+  let prevStart: IsoDate;
+  let buckets: WorkBucket[];
+  if (kind === "week") {
+    start = weekStart(today);
+    prevStart = addDays(start, -7);
+    buckets = Array.from({ length: 7 }, (_, i) => addDays(start, i)).map((d) => ({ start: d, end: d, label: weekday(d) }));
+  } else if (kind === "month") {
+    start = monthStart(today);
+    prevStart = addMonths(start, -1);
+    const end = addDays(addMonths(start, 1), -1);
+    buckets = [];
+    for (let w = weekStart(start); w <= end; w = addDays(w, 7)) {
+      const b = w < start ? start : w;
+      buckets.push({ start: b, end: addDays(w, 6) > end ? end : addDays(w, 6), label: dayMonth(b) });
+    }
+  } else {
+    const n = kind === "3m" ? 3 : 6;
+    start = addMonths(monthStart(today), -(n - 1));
+    prevStart = addMonths(start, -n);
+    buckets = Array.from({ length: n }, (_, i) => addMonths(start, i)).map((m) => ({ start: m, end: addDays(addMonths(m, 1), -1), label: month(m) }));
+  }
+  return { kind, start, end: today, prev: { start: prevStart, end: addDays(prevStart, daysBetween(start, today)) }, buckets };
+}
+
+// ---------------------------------------------------------------------------
+// Project status on the PM dashboard
+// ---------------------------------------------------------------------------
+
+export type ProjectStanding = "on_track" | "at_risk" | "delayed";
+export const PROJECT_STANDINGS: ProjectStanding[] = ["delayed", "at_risk", "on_track"];
+
+/**
+ * Where a running project stands: delayed once it's past its end date or has
+ * overdue tasks; at risk when the budget is at a warning or over, a task is
+ * blocked, it's on hold, or it ends within `soon` days with open tasks left;
+ * on track otherwise. The reasons say why, most serious first.
+ */
+export function projectStanding(
+  p: {
+    status: "active" | "on_hold";
+    endDate: IsoDate | null;
+    health: "on_track" | "warning" | "over_budget" | "no_budget";
+    overdueTasks: number;
+    blockedTasks: number;
+    openTasks: number;
+  },
+  today: IsoDate,
+  soon = 7,
+): { standing: ProjectStanding; reasons: string[] } {
+  const delayed: string[] = [];
+  const risk: string[] = [];
+  if (p.endDate && p.endDate < today) delayed.push(`Past end date by ${daysLate(p.endDate, today)}d`);
+  if (p.overdueTasks) delayed.push(`${p.overdueTasks} overdue ${p.overdueTasks === 1 ? "task" : "tasks"}`);
+  if (p.health === "over_budget") risk.push("Over budget");
+  else if (p.health === "warning") risk.push("Budget warning");
+  if (p.blockedTasks) risk.push(`${p.blockedTasks} blocked`);
+  if (p.status === "on_hold") risk.push("On hold");
+  if (p.endDate && p.endDate >= today && p.endDate <= addDays(today, soon) && p.openTasks) risk.push(`Ends soon with ${p.openTasks} open`);
+  return { standing: delayed.length ? "delayed" : risk.length ? "at_risk" : "on_track", reasons: [...delayed, ...risk] };
+}
+
+/** Percent of capacity spent on billable work; null without capacity (Metric Dictionary). */
+export function utilizationPct(billableMinutes: number, capacityHours: number): number | null {
+  return metricUtilization(billableMinutes / 60, capacityHours);
 }

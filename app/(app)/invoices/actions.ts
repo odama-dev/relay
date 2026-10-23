@@ -11,8 +11,8 @@ import { prisma } from "@/lib/prisma";
 import { parseIsoDate } from "@/lib/time/pure";
 import { invoiceTotal, itemAmount, requestsMatchTotal } from "@/lib/invoices/pure";
 import { ensurePaymentLinks, sendInvoice } from "@/lib/invoices/issue";
-import { matchPayment, refreshInvoice } from "@/lib/invoices/payments";
-import { invoiceSchema, sendInvoiceSchema, uuid } from "@/lib/validation";
+import { matchPayment, proofRejected, proofVerified, refreshInvoice } from "@/lib/invoices/payments";
+import { invoiceSchema, proofDecisionSchema, sendInvoiceSchema, uuid } from "@/lib/validation";
 
 const FORBIDDEN = "Only Sales and Finance manage invoices.";
 
@@ -60,6 +60,8 @@ export async function createInvoice(raw: unknown): Promise<ActionResult<{ id: st
           currency: project.currency,
           issueDate: parseIsoDate(d.issueDate),
           notes: d.notes ?? null,
+          kind: d.kind,
+          platform: d.platform,
           billToName: project.client.name,
           billToAddress: project.client.billingAddress,
           billToEmail: project.client.billingEmail,
@@ -90,7 +92,7 @@ export async function updateInvoice(id: unknown, raw: unknown): Promise<ActionRe
       const total = checkTotals(d, inv.currency);
       const res = await tx.invoice.updateMany({
         where: { id: invoiceId },
-        data: { issueDate: parseIsoDate(d.issueDate), notes: d.notes ?? null, subtotal: total, total },
+        data: { issueDate: parseIsoDate(d.issueDate), notes: d.notes ?? null, kind: d.kind, platform: d.platform, subtotal: total, total },
       });
       if (res.count === 0) fail(FORBIDDEN);
       await writeLines(tx, invoiceId, d, inv.currency);
@@ -204,5 +206,31 @@ export async function refreshInvoiceStatus(id: unknown): Promise<ActionResult> {
     if (!visible) fail("Invoice not found.");
     await refreshInvoice(invoiceId);
     revalidateInvoice(invoiceId);
+  });
+}
+
+/**
+ * Phase 2 · M9 — Finance verifies a payment proof (it becomes a payment and
+ * counts as revenue) or rejects it with a note (the invoice goes back to
+ * Sent / Overdue). RLS: Finance module, never the person who submitted it.
+ */
+export async function decidePaymentProof(id: unknown, raw: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const user = await requireUser();
+    const proofId = parseOrFail(uuid, id);
+    const d = parseOrFail(proofDecisionSchema, raw);
+    const proof = await asUser(user, async (tx) => {
+      const p = await tx.paymentProof.findUnique({ where: { id: proofId }, select: { invoiceId: true, invoice: { select: { projectId: true } } } });
+      if (!p) fail("Proof not found.");
+      await tx.paymentProof.update({
+        where: { id: proofId },
+        data: { status: d.verify ? "verified" : "rejected", reviewNote: d.note ?? null, ...(d.fxRateToIdr !== null ? { fxRateToIdr: d.fxRateToIdr } : {}) },
+      });
+      return p;
+    });
+    if (d.verify) await proofVerified(proofId, user.id);
+    else await proofRejected(proofId);
+    await logActivity({ actorId: user.id, entityType: "invoice", entityId: proof.invoiceId, action: d.verify ? "proof_verified" : "proof_rejected", metadata: { proofId, note: d.note } });
+    revalidateInvoice(proof.invoiceId, proof.invoice.projectId);
   });
 }

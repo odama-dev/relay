@@ -11,7 +11,7 @@ import { getSettings } from "@/lib/settings";
 import { freezeRetainerMonths } from "@/lib/health/queries";
 import { checkBudgetAlerts } from "@/lib/health/alerts";
 import { parseIsoDate } from "@/lib/time/pure";
-import { budgetSchema, PROJECT_STATUSES, projectSchema, uuid, type BudgetInput } from "@/lib/validation";
+import { budgetSchema, HR_EVENT_COLORS, PROJECT_STATUSES, projectSchema, uuid, type BudgetInput } from "@/lib/validation";
 import { z } from "zod";
 
 const date = (d: string) => parseIsoDate(d);
@@ -39,11 +39,16 @@ function revalidateProject(id?: string) {
 }
 
 /** M1.2 — create a client or internal project. Code, PM membership and the General section come from triggers. */
-export async function createProject(raw: unknown): Promise<ActionResult<{ id: string; code: string }>> {
+/**
+ * `fromDeal` (Phase 2 · M9): a won deal becomes this project — linked in the
+ * same transaction, so a deal that isn't won (deals_derive) creates nothing.
+ */
+export async function createProject(raw: unknown, fromDeal?: unknown): Promise<ActionResult<{ id: string; code: string }>> {
   return run(async () => {
     const user = await requireUser();
     if (!perms.createProjects(user)) fail("Only PMs, Sales and C-Level create projects.");
     const d = parseOrFail(projectSchema, raw);
+    const dealId = fromDeal === undefined ? null : parseOrFail(uuid, fromDeal);
     await assertPm(d.pmId);
     const isClient = d.kind === "client";
 
@@ -72,10 +77,15 @@ export async function createProject(raw: unknown): Promise<ActionResult<{ id: st
       if (isClient && perms.editContractValue(user)) {
         await tx.projectContract.create({ data: { projectId: p.id, contractValue: d.contractValue ?? null, retainerFeePerMonth: retainerFee(d) } });
       }
+      if (dealId) {
+        const res = await tx.deal.updateMany({ where: { id: dealId, projectId: null }, data: { projectId: p.id, clientId: p.clientId } });
+        if (res.count === 0) fail("This deal already has a project, or you can't change it.");
+      }
       return p;
     });
 
-    await logActivity({ actorId: user.id, entityType: "project", entityId: project.id, action: "created", metadata: { code: project.code } });
+    await logActivity({ actorId: user.id, entityType: "project", entityId: project.id, action: "created", metadata: { code: project.code, ...(dealId ? { fromDeal: dealId } : {}) } });
+    if (dealId) revalidatePath("/sales");
     revalidateProject();
     return { id: project.id, code: project.code };
   });
@@ -168,6 +178,19 @@ export async function setProjectStatus(id: unknown, status: ProjectStatus): Prom
     if (res.count === 0) fail("You can't change this project.");
     await logActivity({ actorId: user.id, entityType: "project", entityId: projectId, action: "status_changed", metadata: { status } });
     revalidateProject(projectId);
+  });
+}
+
+/** A project's dot on the calendars — whoever may edit the project (its PM, Sales, C-Level). */
+export async function setProjectColor(id: unknown, color: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const user = await requireUser();
+    const projectId = parseOrFail(uuid, id);
+    const calendarColor = parseOrFail(z.enum(HR_EVENT_COLORS), color);
+    const res = await asUser(user, (tx) => tx.project.updateMany({ where: { id: projectId }, data: { calendarColor } }));
+    if (res.count === 0) fail("You can't change this project.");
+    await logActivity({ actorId: user.id, entityType: "project", entityId: projectId, action: "color_changed", metadata: { color: calendarColor } });
+    revalidatePath("/dashboard");
   });
 }
 

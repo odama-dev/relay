@@ -97,6 +97,12 @@ export function SettingsForm({
         />
       </FormSection>
 
+      <FormSection title="Sales pipeline" description="An open deal is marked stale after this long in the same stage.">
+        <FormField label="Stale after (days)" htmlFor="s-stale" error={errors.sales_stale_days?.message}>
+          <Input {...fieldA11y("s-stale", errors.sales_stale_days?.message)} type="number" min={1} max={365} className="max-w-32" {...register("sales_stale_days", { valueAsNumber: true })} />
+        </FormField>
+      </FormSection>
+
       <FormSection title="Currencies" description="Clients may pay in another currency; the studio receives IDR.">
         <div className="grid gap-4 sm:grid-cols-[1fr_200px]">
           <FormField label="Active currencies" error={errors.currencies?.message}>

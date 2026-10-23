@@ -33,6 +33,8 @@ export const settingsSchema = z.object({
       website: z.string().catch(""),
     })
     .catch({ name: "Odama Studio", address: "", email: "", website: "" }),
+  /** Phase 2 · M9 — an open deal is stale after this many days in one stage. */
+  sales_stale_days: z.number().int().min(1).max(365).catch(14),
   /** C-Level dashboard §3.8 — when an active project needs attention. C-Level and admins write it. */
   project_attention_rules: z
     .object({

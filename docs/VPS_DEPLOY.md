@@ -199,6 +199,9 @@ AUTH="Authorization: Bearer <CRON_SECRET>"
 5 0 1 * *    curl -fsS -H "$AUTH" $APP/retainer-rollover  >/dev/null
 10 0 * * *   curl -fsS -H "$AUTH" $APP/overdue-invoices   >/dev/null
 15 * * * *   curl -fsS -H "$AUTH" $APP/budget-alerts      >/dev/null
+20 * * * *   curl -fsS -H "$AUTH" $APP/review-sla         >/dev/null
+0 1 1 * *    curl -fsS -H "$AUTH" $APP/kpi-snapshot       >/dev/null
+55 23 * * *  curl -fsS -H "$AUTH" $APP/pipeline-snapshot  >/dev/null
 0 2 * * *    set -a; . /home/odama/odama-os/.env; BACKUP_REMOTE=r2:odama-backups /home/odama/odama-os/scripts/backup.sh >> /home/odama/backup.log 2>&1
 ```
 

@@ -17,8 +17,8 @@ import { TaskCardBody } from "./task-row";
 export const STATUS_LABEL: Record<TaskStatus, string> = {
   todo: "To do",
   in_progress: "In progress",
-  review: "Review",
-  done: "Done",
+  review: "In review",
+  done: "Approved",
   blocked: "Blocked",
 };
 

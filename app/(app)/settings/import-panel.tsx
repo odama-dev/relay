@@ -87,7 +87,7 @@ export function ImportPanel() {
     { id: "line", header: "Line", sortValue: (r) => r.line, cell: (r) => <span className="tabular">{r.line}</span>, className: "w-16" },
     { id: "key", header: "Record", cell: (r) => <span className="truncate">{r.key.replace(/^[0-9a-f-]{36}:|^internal:/, "")}</span> },
     { id: "action", header: "Result", sortValue: (r) => r.action, cell: (r) => <StatusBadge value={ACTION_TONE[r.action] ?? "draft"} label={r.action} /> },
-    { id: "errors", header: "Errors", cell: (r) => <span className="text-destructive whitespace-normal">{r.errors.join("; ")}</span> },
+    { id: "errors", header: "Errors", cell: (r) => <span className="text-destructive block max-w-md truncate" title={r.errors.join("; ")}>{r.errors.join("; ")}</span> },
   ];
 
   return (

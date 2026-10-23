@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import type { ContractType, OosStatus, ProjectStatus, UserRole } from "@prisma/client";
+import type { ContractType, Division, OosStatus, ProjectStatus, UserRole } from "@prisma/client";
 import { withRls, type Tx } from "@/lib/db";
 import type { CurrentUser } from "@/lib/auth";
 import { num, numOr0 } from "@/lib/money";
@@ -9,6 +9,8 @@ import { computeHealth } from "@/lib/health/queries";
 import { normalizeThresholds, retainerMonths, snapshot, type HealthStatus, type OosMinutes } from "@/lib/health/pure";
 import { addDays, addMonths, isIsoDate, isoDate, monthStart, monthsBetween, parseIsoDate, todayIn, type IsoDate } from "@/lib/time/pure";
 import { onTimeRate } from "@/lib/dashboard/pure";
+import { onTimeInputs } from "@/lib/tasks/timing";
+import { burnVsProgress, countsForUtilization, isBillableEntry } from "@/lib/metrics/pure";
 import {
   AGING_BUCKETS,
   PERIOD_KINDS,
@@ -89,6 +91,7 @@ type Person = {
   id: string;
   name: string;
   role: UserRole;
+  division: Division | null;
   active: boolean;
   employment: Employment;
   costs: { effectiveFrom: IsoDate; monthlyCostIdr: number }[];
@@ -99,6 +102,8 @@ type Person = {
 
 type Base = {
   settings: AppSettings;
+  /** Public holidays — off everyone's capacity. */
+  holidays: Set<IsoDate>;
   people: Person[];
   revenueTargets: RevenueTargetRow[];
   /** Currency → IDR rate for estimates: the reference rate, else the last payment's (§3.6). */
@@ -109,7 +114,8 @@ const loadBase = cache(async (userId: string, timezone: string, today: IsoDate):
   const [settings, data] = await Promise.all([
     getSettings(),
     withRls(userId, async (tx) => ({
-      profiles: await tx.profile.findMany({ where: { status: { not: "invited" } }, select: { id: true, fullName: true, role: true, status: true, deactivatedAt: true } }),
+      profiles: await tx.profile.findMany({ where: { status: { not: "invited" } }, select: { id: true, fullName: true, role: true, division: true, status: true, deactivatedAt: true } }),
+      holidays: await tx.publicHoliday.findMany({ select: { date: true } }),
       costs: await tx.personCost.findMany({ orderBy: { effectiveFrom: "asc" } }),
       capacity: await tx.personCapacity.findMany({ orderBy: { effectiveFrom: "asc" } }),
       overrides: await tx.capacityOverride.findMany(),
@@ -126,6 +132,7 @@ const loadBase = cache(async (userId: string, timezone: string, today: IsoDate):
     id: p.id,
     name: p.fullName,
     role: p.role,
+    division: p.division,
     active: p.status === "active",
     // Cost and capacity rows carry their own start dates; only leaving ends a person's time.
     employment: { activeFrom: "1900-01-01", activeTo: p.deactivatedAt ? todayIn(timezone, p.deactivatedAt) : null },
@@ -141,6 +148,7 @@ const loadBase = cache(async (userId: string, timezone: string, today: IsoDate):
   for (const p of data.lastFx) if (!rates.has(p.currency) && p.fxRateToIdr) rates.set(p.currency, numOr0(p.fxRateToIdr));
   return {
     settings,
+    holidays: new Set(data.holidays.map((h) => isoDate(h.date))),
     people,
     revenueTargets: data.revenueTargets.map((t) => ({ year: t.year, month: t.month, targetIdr: numOr0(t.targetIdr) })),
     rates,
@@ -160,7 +168,7 @@ function hourlyCostFn(b: Base) {
     const cost = personCost(person.costs, person.employment, w);
     // No capacity row (e.g. C-Level, who isn't in utilization): a standard 8-hour workday.
     const hours =
-      availableHours(person.capacity, person.overrides, person.employment, w, b.settings.workdays) ??
+      availableHours(person.capacity, person.overrides, person.employment, w, b.settings.workdays, b.holidays) ??
       workdaysIn(w, b.settings.workdays).length * 8;
     const value = cost !== null && hours ? cost / hours : null;
     memo.set(key, value);
@@ -201,7 +209,7 @@ const loadMoney = cache(async (userId: string, timezone: string, today: IsoDate,
     // All of them: the overview's "All time" view reaches back to the first one.
     expenses: await tx.expense.findMany({ select: { expenseDate: true, amount: true, currency: true, kind: true, projectId: true } }),
     open: await tx.invoicePaymentRequest.findMany({
-      where: { status: "pending", invoice: { status: { in: ["sent", "partially_paid", "overdue"] } } },
+      where: { status: "pending", invoice: { status: { in: ["sent", "partially_paid", "payment_submitted", "overdue"] } } },
       select: { id: true, amount: true, dueDate: true, invoice: { select: { id: true, currency: true, clientId: true, projectId: true } } },
     }),
     lateHistory: await tx.invoicePaymentRequest.findMany({
@@ -481,6 +489,11 @@ export type ProjectEconomics = {
   projectedMargin: number | null;
   /** Every hour on the project had a cost per hour. */
   costKnown: boolean;
+  /**
+   * A running fixed-price project: budget burn against progress, shown
+   * instead of its (not yet meaningful) margin — Metric Dictionary "Margin".
+   */
+  burn: { burnPct: number | null; progressPct: number | null; ahead: boolean | null } | null;
 };
 
 type EntryRow = { project_id: string; user_id: string; day: Date; oos_status: OosStatus; minutes: number };
@@ -512,6 +525,8 @@ const loadEconomics = cache(async (userId: string, timezone: string, today: IsoD
       WHERE p.kind = 'client'
       GROUP BY 1, 2, 3, 4`,
     openEstimates: await tx.task.groupBy({ by: ["projectId"], where: { status: { not: "done" }, section: { archivedAt: null } }, _sum: { estimateHours: true } }),
+    budgets: await tx.projectBudget.findMany({ select: { projectId: true, budgetHours: true } }),
+    taskCounts: await tx.task.groupBy({ by: ["projectId", "status"], where: { section: { archivedAt: null } }, _count: { _all: true } }),
   }));
   const hourly = hourlyCostFn(b);
   const personBy = new Map(b.people.map((p) => [p.id, p]));
@@ -565,6 +580,16 @@ const loadEconomics = cache(async (userId: string, timezone: string, today: IsoD
 
     const pm = margin(revenuePeriod, periodCost + directPeriod);
     const lifetime = margin(revenueAll, cost + directAll);
+    const counts = data.taskCounts.filter((c) => c.projectId === p.id);
+    const running = p.contractType === "fixed" && (p.status === "active" || p.status === "on_hold");
+    const burn = running
+      ? burnVsProgress({
+          usedHours: hours,
+          budgetHours: num(data.budgets.find((x) => x.projectId === p.id)?.budgetHours),
+          doneTasks: counts.filter((c) => c.status === "done").reduce((n, c) => n + c._count._all, 0),
+          totalTasks: counts.reduce((n, c) => n + c._count._all, 0),
+        })
+      : null;
     return {
       id: p.id,
       code: p.code,
@@ -583,6 +608,7 @@ const loadEconomics = cache(async (userId: string, timezone: string, today: IsoD
       oosValue: effectiveRate !== null ? round2(oosApproved * effectiveRate) : null,
       projectedMargin,
       costKnown,
+      burn,
     };
   });
   return { rows };
@@ -616,7 +642,7 @@ export async function loadProjects(cc: ClevelContext) {
       FROM time_entries WHERE project_id IS NOT NULL GROUP BY 1, 2, 3`,
     completed: await tx.task.findMany({
       where: { completedAt: { gte: since([sixMonths[0]!, cc.prev.start].sort()[0]!) }, status: "done" },
-      select: { dueDate: true, completedAt: true },
+      select: { id: true, dueDate: true, originalDueDate: true, approvedAt: true, completedAt: true },
     }),
     overdue: await tx.task.findMany({
       where: { status: { not: "done" }, dueDate: { lt: parseIsoDate(cc.today) }, section: { archivedAt: null }, project: { status: { in: ["active", "on_hold"] } } },
@@ -662,7 +688,11 @@ export async function loadProjects(cc: ClevelContext) {
   });
 
   // 5.3 Delivery
-  const done = data.completed.map((t) => ({ dueDate: t.dueDate ? isoDate(t.dueDate) : null, completedOn: dayOf(cc, t.completedAt!) }));
+  const timing = await rls(cc, (tx) => onTimeInputs(tx, data.completed, cc.user.timezone, cc.today));
+  const done = data.completed.map((t) => {
+    const x = timing.get(t.id)!;
+    return { dueDate: x.dueDate, completedOn: x.completedOn ?? dayOf(cc, t.completedAt!) };
+  });
   const onTime = (w: Window) => onTimeRate(done.filter((t) => inWindow(t.completedOn, w)));
   const division = new Map<string, number>();
   for (const t of data.overdue) {
@@ -795,14 +825,17 @@ export async function loadUtilization(cc: ClevelContext) {
   const entries = data.entries.map((e) => ({ ...e, d: isoDate(e.day) }));
   const people = b.people.filter((p) => p.role !== "c_level" && (p.active || (p.employment.activeTo !== null && p.employment.activeTo >= cc.period.start)));
   const band = b.settings.clevel_dashboard_thresholds.utilizationBand;
-  const isBillable = (e: UtilEntry) => e.is_billable && e.oos_status !== "pending";
+  const isBillable = (e: UtilEntry) => isBillableEntry({ isBillable: e.is_billable, oosStatus: e.oos_status });
+  // Studio utilization counts billable divisions only; the rest show per role.
+  const billableIds = new Set(people.filter(countsForUtilization).map((p) => p.id));
+  const studioOnly = (rows: PersonUtilization[]) => rows.filter((r) => billableIds.has(r.id));
 
   const perPerson = (w: Window): PersonUtilization[] =>
     people.map((p) => {
       const mine = entries.filter((e) => e.user_id === p.id && inWindow(e.d, w));
       const logged = round2(mine.reduce((s, e) => s + e.minutes, 0) / 60);
       const billable = round2(mine.filter(isBillable).reduce((s, e) => s + e.minutes, 0) / 60);
-      const available = availableHours(p.capacity, p.overrides, p.employment, w, b.settings.workdays);
+      const available = availableHours(p.capacity, p.overrides, p.employment, w, b.settings.workdays, b.holidays);
       const utilization = utilizationPct(billable, available);
       const loggedDays = new Set(mine.map((e) => e.d));
       const past = overlap(w, { start: w.start, end: addDays(cc.today, -1) });
@@ -824,21 +857,21 @@ export async function loadUtilization(cc: ClevelContext) {
   };
 
   const rows = perPerson(cc.period);
-  const studio = aggregate(rows);
-  const previous = aggregate(perPerson(cc.prev));
+  const studio = aggregate(studioOnly(rows));
+  const previous = aggregate(studioOnly(perPerson(cc.prev)));
   const roles = [...new Set(rows.map((r) => r.role))].map((role) => ({ role, ...aggregate(rows.filter((r) => r.role === role)) }));
   // The overview's 1, 3 and 6 month views: the last n months up to today,
   // each against the n months before it.
   const ranges = ([1, 3, 6] as const).map((n) => {
     const start = lastMonths(cc.today, n)[0]!;
     const cur = perPerson({ start, end: cc.today });
-    const before = aggregate(perPerson({ start: addMonths(start, -n), end: addDays(start, -1) }));
-    const s = aggregate(cur);
+    const before = aggregate(studioOnly(perPerson({ start: addMonths(start, -n), end: addDays(start, -1) })));
+    const s = aggregate(studioOnly(cur));
     const byRole = [...new Set(cur.map((r) => r.role))].map((role) => ({ role, ...aggregate(cur.filter((r) => r.role === role)) }));
     return { months: n, studio: s, roles: byRole, change: delta(s.utilization ?? 0, before.utilization ?? 0).change };
   });
   const trend = twelve.map((mo) => {
-    const a = aggregate(perPerson(monthWindow(mo, cc.today)));
+    const a = aggregate(studioOnly(perPerson(monthWindow(mo, cc.today))));
     return { month: mo, utilization: a.utilization, target: a.target };
   });
 
@@ -866,8 +899,8 @@ export async function loadUtilization(cc: ClevelContext) {
     const tasks = data.tasks.filter((t) => isoDate(t.dueDate!) <= w.end);
     const perRole = [...new Set(people.map((p) => p.role))].map((role) => {
       const team = people.filter((p) => p.role === role && p.active);
-      const available = round2(team.reduce((s, p) => s + (availableHours(p.capacity, p.overrides, p.employment, w, b.settings.workdays) ?? 0), 0));
-      const targeted = round2(team.reduce((s, p) => s + ((availableHours(p.capacity, p.overrides, p.employment, w, b.settings.workdays) ?? 0) * (p.target ?? 0)) / 100, 0));
+      const available = round2(team.reduce((s, p) => s + (availableHours(p.capacity, p.overrides, p.employment, w, b.settings.workdays, b.holidays) ?? 0), 0));
+      const targeted = round2(team.reduce((s, p) => s + ((availableHours(p.capacity, p.overrides, p.employment, w, b.settings.workdays, b.holidays) ?? 0) * (p.target ?? 0)) / 100, 0));
       const scheduled = round2(tasks.filter((t) => t.owner?.role === role).reduce((s, t) => s + numOr0(t.estimateHours), 0));
       const remaining = round2(targeted - scheduled);
       return { role, available, targeted, scheduled, remaining, status: capacityStatus(remaining, targeted) as CapacityStatus };

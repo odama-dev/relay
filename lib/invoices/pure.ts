@@ -1,4 +1,4 @@
-import type { InvoiceStatus, PaymentRequestStatus } from "@prisma/client";
+import type { InvoiceKind, InvoiceStatus, PaymentPlatform, PaymentRequestStatus } from "@prisma/client";
 import { currencyDecimals } from "@/lib/format";
 import type { IsoDate } from "@/lib/time/pure";
 
@@ -60,7 +60,8 @@ export type RequestState = { amount: number; status: PaymentRequestStatus; dueDa
 
 /**
  * Status of an issued invoice from its payments (M5.6, M5.8):
- * Paid once fully paid; otherwise Overdue while any unpaid request is past
+ * Paid once fully paid; otherwise Payment submitted while a proof waits for
+ * Finance (Phase 2 · M9); otherwise Overdue while any unpaid request is past
  * due; otherwise Partially paid / Sent. Draft and Void never change here.
  */
 export function deriveInvoiceStatus(
@@ -70,9 +71,11 @@ export function deriveInvoiceStatus(
   requests: RequestState[],
   today: IsoDate,
   currency: string,
+  proofPending = false,
 ): InvoiceStatus {
   if (current === "draft" || current === "void") return current;
   if (toMinor(amountPaid, currency) >= toMinor(total, currency) && total > 0) return "paid";
+  if (proofPending) return "payment_submitted";
   const overdue = requests.some((r) => r.status !== "paid" && r.status !== "void" && r.dueDate < today);
   if (overdue) return "overdue";
   return amountPaid > 0 ? "partially_paid" : "sent";
@@ -85,11 +88,37 @@ export function fxRateToIdr(settlementIdr: number | null, amount: number, curren
   return Math.round((settlementIdr / amount) * 1_000_000) / 1_000_000;
 }
 
+/**
+ * Per-currency amounts summed into IDR at indicative rates (whole rupiah).
+ * Null when any currency has no rate: a partial total would read as complete.
+ */
+export function normalizeToIdr(amounts: { currency: string; amount: number }[], toIdr: Record<string, number>): number | null {
+  let idr = 0;
+  for (const { currency, amount } of amounts) {
+    const rate = currency === "IDR" ? 1 : toIdr[currency];
+    if (!rate) return null;
+    idr += Math.round(amount * rate);
+  }
+  return idr;
+}
+
 export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   draft: "Draft",
   sent: "Sent",
   partially_paid: "Partially paid",
+  payment_submitted: "Payment submitted",
   paid: "Paid",
   overdue: "Overdue",
   void: "Void",
 };
+
+/** Phase 2 · M9 — how the client pays, and which bill this is. */
+export const PLATFORM_LABELS: Record<PaymentPlatform, string> = {
+  xendit: "Xendit",
+  bank_transfer: "Bank transfer",
+  wise: "Wise",
+  paypal: "PayPal",
+  other: "Other",
+};
+
+export const INVOICE_KIND_LABELS: Record<InvoiceKind, string> = { dp: "Down payment", term: "Term", final: "Final" };

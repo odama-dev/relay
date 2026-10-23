@@ -45,6 +45,8 @@ describe("money", () => {
   it("formats per currency", () => {
     expect(formatMoney(15_900_000, "IDR")).toBe("IDR 15,900,000");
     expect(formatMoney(1250.5, "USD")).toBe("$1,250.50");
+    expect(formatMoney(1250.5, "SGD")).toBe("SGD 1,250.50");
+    expect(formatMoney(1250.5, "AUD")).toBe("A$1,250.50");
     expect(formatMoney(Number.NaN, "USD")).toBe("—");
   });
 });
@@ -66,5 +68,12 @@ describe("time", () => {
   it("sentence-cases enums", () => {
     expect(sentenceEnum("in_progress")).toBe("In progress");
     expect(sentenceEnum("on_hold")).toBe("On hold");
+  });
+});
+
+describe("formatClock", () => {
+  it("prints 12-hour times", async () => {
+    const { formatClock } = await import("./format");
+    expect(["00:05", "09:00", "12:30", "15:00"].map(formatClock)).toEqual(["12:05 AM", "9:00 AM", "12:30 PM", "3:00 PM"]);
   });
 });

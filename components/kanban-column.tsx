@@ -16,10 +16,17 @@ export function KanbanColumn({
   label,
   itemIds,
   isTarget = false,
+  tone,
+  aside,
   children,
 }: {
+  /** Droppable id — a status, or a pipeline stage id. */
   status: string;
   label: string;
+  /** Status value the dot's colour follows, when `status` isn't one (e.g. a stage's category). */
+  tone?: string;
+  /** Right of the count, e.g. the column's total value. */
+  aside?: ReactNode;
   /** Card ids in display order — drives in-column sorting. */
   itemIds: string[];
   /** The dragged card currently sits in this column. */
@@ -38,7 +45,7 @@ export function KanbanColumn({
       )}
     >
       <div className="flex h-8 items-center gap-2 px-2">
-        <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: statusColor(status) }} />
+        <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: statusColor(tone ?? status) }} />
         <h3 className="truncate text-body font-semibold">{label}</h3>
         <span
           className={cn(
@@ -49,6 +56,7 @@ export function KanbanColumn({
         >
           {itemIds.length}
         </span>
+        {aside && <span className="text-muted-foreground ml-auto truncate text-caption tabular-nums">{aside}</span>}
       </div>
       <SortableContext id={status} items={itemIds} strategy={verticalListSortingStrategy}>
         <div ref={setNodeRef} className="flex min-h-24 flex-1 flex-col gap-2">

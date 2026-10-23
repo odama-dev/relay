@@ -4,6 +4,7 @@ import {
   formatInvoiceNumber,
   fxRateToIdr,
   invoiceTotal,
+  normalizeToIdr,
   itemAmount,
   requestsMatchTotal,
   splitByPercent,
@@ -69,6 +70,13 @@ describe("deriveInvoiceStatus", () => {
     expect(deriveInvoiceStatus("overdue", 1000, 500, requests, today, "USD")).toBe("partially_paid");
   });
 
+  it("waits on Finance while a proof is pending, even when overdue — paid still wins", () => {
+    const requests = [req(500, "pending", "2026-10-01"), req(500, "pending", "2026-11-20")];
+    expect(deriveInvoiceStatus("overdue", 1000, 0, requests, today, "USD", true)).toBe("payment_submitted");
+    expect(deriveInvoiceStatus("payment_submitted", 1000, 1000, requests, today, "USD", true)).toBe("paid");
+    expect(deriveInvoiceStatus("payment_submitted", 1000, 0, requests, today, "USD", false)).toBe("overdue");
+  });
+
   it("never touches drafts or void invoices", () => {
     expect(deriveInvoiceStatus("draft", 1000, 0, [], today, "USD")).toBe("draft");
     expect(deriveInvoiceStatus("void", 1000, 1000, [], today, "USD")).toBe("void");
@@ -80,5 +88,14 @@ describe("fxRateToIdr", () => {
     expect(fxRateToIdr(16_250_000, 1000, "USD")).toBe(16_250);
     expect(fxRateToIdr(null, 1000, "USD")).toBeNull();
     expect(fxRateToIdr(5_000_000, 5_000_000, "IDR")).toBe(1);
+  });
+});
+
+describe("normalizeToIdr", () => {
+  it("sums currencies into whole rupiah", () => {
+    expect(normalizeToIdr([{ currency: "IDR", amount: 1_000_000 }, { currency: "USD", amount: 10.5 }], { USD: 16_000.4 })).toBe(1_168_004);
+  });
+  it("refuses a partial total when a rate is missing", () => {
+    expect(normalizeToIdr([{ currency: "USD", amount: 1 }, { currency: "SGD", amount: 1 }], { USD: 16_000 })).toBeNull();
   });
 });

@@ -73,7 +73,7 @@ allowed_cidrs = ["0.0.0.0/0"]
 allowed_cidrs_v6 = ["::/0"]
 
 [realtime]
-enabled = true
+enabled = false
 # Bind realtime via either IPv4 or IPv6. (default: IPv4)
 # ip_version = "IPv6"
 # The maximum length in bytes of HTTP request headers. (default: 4096)
@@ -123,6 +123,17 @@ file_size_limit = "20MiB"
 allowed_mime_types = ["application/pdf"]
 
 [storage.buckets.receipts]
+public = false
+file_size_limit = "10MiB"
+allowed_mime_types = ["application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp"]
+
+# Phase 2: evidence for KPI logs and manual entries; payment proofs from Sales.
+[storage.buckets.evidence]
+public = false
+file_size_limit = "10MiB"
+allowed_mime_types = ["application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp"]
+
+[storage.buckets.payment-proofs]
 public = false
 file_size_limit = "10MiB"
 allowed_mime_types = ["application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp"]
@@ -178,8 +189,9 @@ web3 = 30
 # secret = ""
 
 [auth.email]
-# Allow/disallow new user signups via email to your project.
-enable_signup = false
+# Must stay true: it turns the email provider (password sign-in) on. Public signup
+# is still closed by [auth] enable_signup = false (= DISABLE_SIGNUP on the VPS).
+enable_signup = true
 # If enabled, a user will be required to confirm any email change on both the old, and new email
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true

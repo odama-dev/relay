@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { appLink } from "@/lib/env";
 import { sendSlackDm, slackEscape } from "@/lib/slack";
 
-/** Every notification of Phase 1 (PRD "Semua notifikasi Fase 1"). */
+/** Every notification of Phase 1 (PRD "Semua notifikasi Fase 1") and Phase 2. */
 export const NOTIFICATION_TYPES = {
   task_assigned: "Assigned to a task",
   task_mentioned: "Mentioned in a comment",
@@ -19,7 +19,26 @@ export const NOTIFICATION_TYPES = {
   payment_received: "Payment received",
   payment_unmatched: "Unmatched payment",
   invoice_overdue: "Invoice overdue",
+  leave_requested: "New leave request",
+  leave_decided: "Leave request decision",
   slack_test: "Slack test message",
+  // Phase 2
+  review_requested: "Task waiting for your review",
+  review_decided: "Review decision on your task",
+  review_sla_missed: "Review past its SLA",
+  due_change_requested: "Due date change to approve",
+  due_change_decided: "Due date change decision",
+  kpi_objection: "KPI objection to decide",
+  kpi_objection_decided: "KPI objection decision",
+  kpi_recorded: "Monthly KPI recorded",
+  rating_due: "Rating form to fill",
+  log_review: "Log entry to review",
+  log_decided: "Log entry decision",
+  okr_proposed: "OKR waiting for approval",
+  okr_decided: "OKR decision",
+  okr_checkin: "OKR check-in due",
+  payment_proof_submitted: "Payment proof to verify",
+  payment_proof_decided: "Payment proof decision",
 } as const;
 
 export type NotificationType = keyof typeof NOTIFICATION_TYPES;

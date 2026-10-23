@@ -162,7 +162,8 @@ function MoneySkeleton() {
 type Projects = Awaited<ReturnType<typeof loadProjects>>;
 
 function ProjectsSection({ p }: { p: Projects }) {
-  const byMargin = [...p.margins].sort((a, b) => b.period.margin - a.period.margin);
+  // Running fixed-price projects show burn vs progress, so they don't rank on margin.
+  const byMargin = p.margins.filter((r) => !r.burn).sort((a, b) => b.period.margin - a.period.margin);
   const top = byMargin.slice(0, 3);
   const lowest = byMargin.slice(3).slice(-3);
   const retainers = p.portfolio.byType.find((t) => t.type === "retainer")?.count ?? 0;

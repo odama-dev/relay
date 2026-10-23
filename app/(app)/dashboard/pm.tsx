@@ -1,146 +1,211 @@
-import Link from "next/link";
-import { getApprovalQueues } from "@/lib/time/approvals";
-import { loadMyProjectHealth, loadProjectBilling, loadTasksAtRisk } from "@/lib/dashboard/queries";
-import type { RiskKind } from "@/lib/dashboard/pure";
-import { formatDateShort, formatHoursValue } from "@/lib/format";
-import { CardGroupLabel, CardList, DashboardCard, cardRowClass } from "@/components/dashboard-card";
-import { EntityTabs } from "@/components/entity-tabs";
-import { HealthIndicator } from "@/components/health-indicator";
-import { StatusBadge } from "@/components/status-badge";
-import { OosQueue } from "@/app/(app)/approvals/oos-queue";
-import { CorrectionsQueue } from "@/app/(app)/approvals/corrections-queue";
+import { Suspense } from "react";
+import type { CurrentUser } from "@/lib/auth";
+import { roleLabel } from "@/lib/roles";
+import { dashboardContext, loadPmProjects, loadPmSummary, loadPmTeam } from "@/lib/dashboard/queries";
+import { greeting, parseWorkPeriodKind, resolveWorkPeriod, type WorkPeriod } from "@/lib/dashboard/pure";
+import { formatDateLong, formatHours, formatHoursValue, formatPercent } from "@/lib/format";
+import { addDays, isIsoDate, monthStart, timeIn } from "@/lib/time/pure";
+import { PageHeader } from "@/components/page-header";
+import { RefreshButton } from "@/components/refresh-button";
+import { SummaryStrip } from "@/components/summary-strip";
+import { Skeleton } from "@/components/ui/skeleton";
+import { DataTableSkeleton } from "@/components/page-skeletons";
+import { PmPlanner } from "@/components/pm/pm-planner";
+import { ProjectStatusList } from "@/components/pm/project-status-list";
+import { PmTeamTable } from "@/components/pm/team-table";
 import { cn } from "@/lib/utils";
-import { defineCard, RequestRow } from "./card";
-import { AssignOwner, TaskRowButton } from "./widgets";
+import { SectionBody } from "./clevel/parts";
+import { WorkPeriodSelect } from "./work-period-select";
+import { Change, StripSkeleton } from "./kpi";
 
-const QUEUE_ROWS = 5;
+type Summary = Awaited<ReturnType<typeof loadPmSummary>>;
+type Team = Awaited<ReturnType<typeof loadPmTeam>>;
 
-/** PM-1 — out-of-scope work and time corrections waiting for your decision. */
-export const ApprovalQueueCard = defineCard({ id: "PM-1", title: "Waiting for your approval", span: "wide" }, (ctx) => getApprovalQueues(ctx.user), (q, _ctx, meta) => {
-  const total = q.oosRows.length + q.correctionRows.length;
+/**
+ * The PM dashboard, laid out like HR's: the projects you run over the chosen
+ * period in one strip, a calendar of their timelines beside where each one
+ * stands, then everyone on them today with the team's figures.
+ */
+export function PmDashboard({ user, searchParams }: { user: CurrentUser; searchParams: Record<string, string | string[] | undefined> }) {
+  const ctx = dashboardContext(user);
+  const kind = parseWorkPeriodKind(searchParams.period);
+  const period = resolveWorkPeriod(kind, ctx.today);
+  // The calendar: ?month=yyyy-mm (default: this month).
+  const rawMonth = typeof searchParams.month === "string" ? `${searchParams.month}-01` : "";
+  const month = isIsoDate(rawMonth) ? rawMonth : monthStart(ctx.today);
+  // The timeline: ?plan=timeline, twelve weeks from ?from= (default: two weeks back).
+  const plan = searchParams.plan === "timeline" ? "timeline" : "calendar";
+  const from = isIsoDate(searchParams.from) ? searchParams.from : addDays(ctx.today, -14);
+  // Each load is shared by the parts that read it (projects: calendar + status list).
+  const summary = loadPmSummary(ctx, period);
+  const projects = loadPmProjects(ctx);
+  const team = loadPmTeam(ctx);
+  const firstName = user.fullName.split(" ")[0] || user.fullName;
   return (
-    <DashboardCard
-      {...meta}
-      count={total}
-      countTone="warning"
-      action={{ label: "All approvals", href: "/approvals" }}
-      isEmpty={total === 0}
-      emptyText="Nothing waiting for your approval."
-      emptyIcon="approvals"
-    >
-      <EntityTabs
-        initial={q.oosRows.length || !q.correctionRows.length ? "out-of-scope" : "corrections"}
-        items={[
-          { value: "out-of-scope", label: "Out of scope", count: q.oosRows.length, content: <OosQueue rows={q.oosRows.slice(0, QUEUE_ROWS)} /> },
-          { value: "corrections", label: "Time corrections", count: q.correctionRows.length, content: <CorrectionsQueue rows={q.correctionRows.slice(0, QUEUE_ROWS)} /> },
-        ]}
+    <div className="flex flex-col">
+      <PageHeader
+        title={`${greeting(timeIn(user.timezone))}, ${firstName}`}
+        description={`${formatDateLong(ctx.today)} · ${roleLabel(user.role)}`}
+        actions={
+          <>
+            <WorkPeriodSelect kind={kind} />
+            <RefreshButton />
+          </>
+        }
+        className="bleed mb-0"
       />
-    </DashboardCard>
-  );
-});
-
-/** PM-2 — which of your projects are close to, or over, budget. */
-export const MyProjectHealthCard = defineCard({ id: "PM-2", title: "Project health", span: "narrow" }, loadMyProjectHealth, (rows, _ctx, meta) => (
-  <DashboardCard {...meta} count={rows.length} action={{ label: "Health", href: "/health" }} isEmpty={rows.length === 0} emptyText="No active projects yet." emptyIcon="health">
-    <CardList>
-      {rows.map((p) => (
-        <li key={p.id}>
-          <Link href={`/projects/${p.id}?tab=health`} className={cn(cardRowClass, "items-start py-2")}>
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate">
-                <span className="text-muted-foreground tabular">{p.code}</span> {p.name}
-              </span>
-              <span className="text-muted-foreground truncate text-caption">
-                {p.client}
-                {p.pendingOosHours > 0 && <> · {formatHoursValue(p.pendingOosHours)} out of scope waiting</>}
-              </span>
-            </span>
-            <span className="flex shrink-0 flex-col items-end gap-1">
-              <StatusBadge value={p.status} />
-              <HealthIndicator health={p} />
-            </span>
-          </Link>
-        </li>
-      ))}
-    </CardList>
-  </DashboardCard>
-));
-
-const RISK_GROUPS: { kind: RiskKind; label: string; tone?: "critical" | "warning" }[] = [
-  { kind: "overdue", label: "Overdue", tone: "critical" },
-  { kind: "blocked", label: "Blocked", tone: "warning" },
-  { kind: "no_owner", label: "No owner" },
-];
-const RISK_ROWS = 10;
-
-/** PM-3 — tasks that could make a project slip. */
-export const TasksAtRiskCard = defineCard({ id: "PM-3", title: "Tasks at risk", span: "wide" }, loadTasksAtRisk, (data, _ctx, meta) => {
-  let budget = RISK_ROWS;
-  const groups = RISK_GROUPS.map((g) => {
-    const rows = data.rows.filter((r) => r.risk === g.kind).slice(0, Math.max(0, budget));
-    budget -= rows.length;
-    return { ...g, rows, count: data.counts[g.kind] };
-  }).filter((g) => g.count > 0);
-  return (
-    <DashboardCard {...meta} count={data.rows.length} countTone={data.counts.overdue ? "critical" : "warning"} isEmpty={data.rows.length === 0} emptyText="Every task is on track." emptyIcon="success">
-      <div className="flex flex-col gap-3">
-        {groups.map((g) => (
-          <div key={g.kind} className="flex flex-col gap-1">
-            <CardGroupLabel label={g.label} count={g.count} tone={g.tone} />
-            {g.rows.length > 0 && (
-              <CardList>
-                {g.rows.map((t) => (
-                  <TaskRowButton
-                    key={t.id}
-                    taskId={t.id}
-                    trailing={g.kind === "no_owner" ? <AssignOwner taskId={t.id} members={data.membersBy[t.projectId] ?? []} /> : undefined}
-                  >
-                    <span className="min-w-0 truncate">{t.title}</span>
-                    <span className="text-muted-foreground shrink-0 text-caption">{t.projectCode}</span>
-                    <span className="ml-auto flex shrink-0 items-center gap-2">
-                      {g.kind !== "no_owner" && <span className="text-muted-foreground hidden truncate text-caption sm:inline">{t.owner ?? "No owner"}</span>}
-                      <span className={cn("tabular w-14 text-right text-caption", t.risk === "overdue" ? "text-destructive" : "text-muted-foreground")}>
-                        {t.dueDate ? formatDateShort(t.dueDate) : "—"}
-                      </span>
-                    </span>
-                  </TaskRowButton>
-                ))}
-              </CardList>
+      <Suspense fallback={<StripSkeleton items={5} />}>
+        <SectionBody title="Your projects" load={() => summary}>
+          {(s) => <PmStrip s={s} period={period} />}
+        </SectionBody>
+      </Suspense>
+      {/* Calendar and the project status column share one full-width row, split by a hairline. */}
+      <div className="bleed grid border-b px-0! lg:grid-cols-[minmax(0,1fr)_360px]">
+        <Suspense fallback={<Skeleton className="m-6 h-[560px] rounded-xl" />}>
+          <SectionBody title="Project calendar" load={() => projects}>
+            {(p) => <PmPlanner view={plan} month={month} from={from} today={ctx.today} projects={p} />}
+          </SectionBody>
+        </Suspense>
+        <aside aria-label="Project status" className="flex min-w-0 flex-col gap-2 border-t px-[var(--page-gutter,1rem)] pb-5 lg:border-t-0 lg:border-l">
+          <h2 className="text-subtitle flex min-h-14 items-center font-semibold">Project status</h2>
+          <Suspense fallback={<Skeleton className="h-64 rounded-xl" />}>
+            <SectionBody title="Project status" load={() => projects}>
+              {(p) => <ProjectStatusList projects={p} today={ctx.today} />}
+            </SectionBody>
+          </Suspense>
+        </aside>
+      </div>
+      <section aria-label="Team" className="flex flex-col">
+        <div className="bleed flex min-h-12 items-center justify-between gap-3 border-b py-2">
+          <h2 className="text-body font-medium">Team today</h2>
+          <span className="text-muted-foreground text-caption">Everyone on your projects — excluding you</span>
+        </div>
+        <Suspense
+          fallback={
+            <>
+              <StripSkeleton items={5} />
+              <DataTableSkeleton cols={6} rows={6} />
+            </>
+          }
+        >
+          <SectionBody title="Team today" load={() => team}>
+            {(t) => (
+              <>
+                <TeamStrip t={t} />
+                <PmTeamTable rows={t.rows} />
+              </>
             )}
-          </div>
-        ))}
-      </div>
-    </DashboardCard>
+          </SectionBody>
+        </Suspense>
+      </section>
+    </div>
   );
-});
+}
 
-/** PM-4 — payments due or late on your projects (invoices are read-only for a PM). */
-export const ProjectBillingCard = defineCard({ id: "PM-4", title: "Project billing", span: "narrow" }, loadProjectBilling, (rows, _ctx, meta) => {
-  const late = rows.filter((r) => r.state === "late");
+function PmStrip({ s, period }: { s: Summary; period: WorkPeriod }) {
+  const billablePct = s.hours.value ? Math.round((s.hours.billable / s.hours.value) * 100) : null;
+  const muted = "text-muted-foreground ml-2 text-subtitle font-normal";
   return (
-    <DashboardCard
-      {...meta}
-      count={rows.length}
-      countTone={late.length ? "critical" : "neutral"}
-      action={{ label: "Invoices", href: "/invoices" }}
-      isEmpty={rows.length === 0}
-      emptyText="No payments due."
-      emptyIcon="invoices"
-    >
-      <div className="flex flex-col gap-3">
-        {late.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <CardGroupLabel label="Late" count={late.length} tone="critical" />
-            <CardList>{late.map((r) => <RequestRow key={r.id} r={r} />)}</CardList>
-          </div>
-        )}
-        {rows.length > late.length && (
-          <div className="flex flex-col gap-1">
-            <CardGroupLabel label="Due within 7 days" count={rows.length - late.length} />
-            <CardList>{rows.filter((r) => r.state === "due_soon").map((r) => <RequestRow key={r.id} r={r} />)}</CardList>
-          </div>
-        )}
-      </div>
-    </DashboardCard>
+    <SummaryStrip
+      variant="even"
+      items={[
+        {
+          label: "Active projects",
+          values: [s.projects.value],
+          delta: (
+            <span className="text-muted-foreground text-caption">
+              {s.projects.overBudget > 0 && <span className="text-destructive">{s.projects.overBudget} over budget · </span>}
+              {s.projects.warning} warning
+            </span>
+          ),
+        },
+        {
+          label: "Team hours · incl. you",
+          values: [
+            <span key="v">
+              {formatHours(s.hours.value)}
+              {billablePct !== null && <span className={muted}>{billablePct}% billable</span>}
+            </span>,
+          ],
+          delta: <Change value={s.hours.value} previous={s.hours.previous} period={period} hours />,
+        },
+        {
+          label: "Tasks completed",
+          values: [
+            <span key="v">
+              {s.tasks.value}
+              {s.tasks.onTimePct !== null && <span className={muted}>{formatPercent(s.tasks.onTimePct)} on time</span>}
+            </span>,
+          ],
+          delta: <Change value={s.tasks.value} previous={s.tasks.previous} period={period} />,
+        },
+        {
+          label: "Out of scope approved",
+          values: [formatHours(s.oos.approved)],
+          delta: (
+            <span className={cn("text-caption", s.oos.pending ? "text-warning" : "text-muted-foreground")}>
+              {s.oos.pending ? `${formatHours(s.oos.pending)} waiting for you` : "Nothing waiting"}
+            </span>
+          ),
+        },
+        {
+          label: "Overdue tasks",
+          tone: s.risk.overdue ? "destructive" : "default",
+          values: [s.risk.overdue],
+          delta: (
+            <span className="text-muted-foreground text-caption">
+              {s.risk.blocked} blocked · {s.risk.noOwner} without owner
+            </span>
+          ),
+        },
+      ]}
+    />
   );
-});
+}
+
+/** The team's figures, under the table header: who's on billable work, utilization, today's hours, who's away. */
+function TeamStrip({ t }: { t: Team }) {
+  const s = t.summary;
+  const caption = "text-muted-foreground text-caption";
+  return (
+    <SummaryStrip
+      variant="even"
+      items={[
+        {
+          label: "On billable projects",
+          values: [`${s.onBillable} of ${s.present}`],
+          delta: <span className={caption}>{s.present - s.onBillable ? `${s.present - s.onBillable} on internal work only` : "Everyone in today"}</span>,
+        },
+        {
+          label: "Team utilization",
+          values: [s.utilization === null ? "—" : formatPercent(s.utilization)],
+          delta: (
+            <span className={caption}>
+              {formatHoursValue(s.billableMinutes / 60)} billable of {formatHoursValue(s.capacityHours)} this week
+            </span>
+          ),
+        },
+        {
+          label: "Logged today",
+          values: [formatHours(s.todayMinutes)],
+          delta: (
+            <span className={caption}>
+              {s.loggedToday} of {s.present} people
+            </span>
+          ),
+        },
+        {
+          label: "Away today",
+          values: [s.away],
+          delta: <span className={caption}>{s.away ? "On leave, permit or sick" : "Nobody away"}</span>,
+        },
+        {
+          label: "Overdue on your projects",
+          tone: s.overdueTasks ? "destructive" : "default",
+          values: [s.overdueTasks],
+          delta: <span className={caption}>Tasks owned by the team</span>,
+        },
+      ]}
+    />
+  );
+}

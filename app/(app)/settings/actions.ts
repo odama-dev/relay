@@ -32,6 +32,7 @@ export async function saveSettings(raw: unknown): Promise<ActionResult> {
       ["reminder_time", d.reminder_time],
       ["workdays", [...new Set(d.workdays)].sort()],
       ["default_alert_thresholds", [...new Set(d.default_alert_thresholds)].sort((a, b) => a - b)],
+      ["sales_stale_days", d.sales_stale_days],
       ["currencies", d.currencies],
       ["base_currency", d.base_currency],
       ["invoice_number_format", d.invoice_number_format],

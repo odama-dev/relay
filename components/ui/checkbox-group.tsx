@@ -307,15 +307,14 @@ const CheckboxItem = forwardRef<HTMLDivElement, CheckboxItemProps>(
           // as well would toggle a second time and undo the first.
         >
           {/* Border */}
-          {/* Checked: the border turns transparent and the check alone marks
-              the state. Unchecked: hover or focus darkens it from border to
+          {/* Checked: the box fills with primary under the check. Unchecked: hover or focus darkens it from border to
               neutral-400 (neutral-500 dark) over 80ms. */}
           <div
             className={cn(
               "absolute inset-0 border-solid transition-all duration-80",
               compact ? "rounded-[4px]" : "rounded-[5px]",
               checked
-                ? "border-[1.5px] border-transparent"
+                ? "border-[1.5px] border-transparent bg-primary"
                 : isActive
                 ? "border-[1.5px] border-neutral-400 dark:border-neutral-500"
                 : "border-[1.5px] border-border"
@@ -356,7 +355,7 @@ const CheckboxItem = forwardRef<HTMLDivElement, CheckboxItemProps>(
                       strokeWidth={2}
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-foreground"
+                      className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-primary-foreground"
                       initial={{ opacity: 1 }}
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 1 }}

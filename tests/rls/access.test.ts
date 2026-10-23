@@ -191,6 +191,14 @@ describe("M1 — clients & projects", () => {
     await denied(as("sales", (tx) => tx.projectMember.create({ data: { projectId: projectA, userId: ids.dev2 } })));
   });
 
+  it("lets the project's PM set its calendar colour; another PM or a designer can't", async () => {
+    const set = (who: keyof typeof ids) => as(who, (tx) => tx.project.updateMany({ where: { id: projectA }, data: { calendarColor: "teal" } }));
+    expect((await set("pm2")).count).toBe(0);
+    expect((await set("dev")).count).toBe(0);
+    expect((await set("pm")).count).toBe(1);
+    expect((await prisma.project.findUniqueOrThrow({ where: { id: projectA } })).calendarColor).toBe("teal");
+  });
+
   it("refuses deactivated people as members", async () => {
     const msg = await denied(as("pm", (tx) => tx.projectMember.create({ data: { projectId: projectA, userId: ids.gone } })));
     expect(msg).toMatch(/active people/);
@@ -234,11 +242,13 @@ describe("M2 — tasks", () => {
     );
   });
 
-  it("hides tasks from non-members, Finance and HR", async () => {
-    for (const who of ["dev2", "finance", "hr", "pm2"] as const) {
+  it("hides tasks from non-members and Finance; HR reads every task but can't change one", async () => {
+    for (const who of ["dev2", "finance", "pm2"] as const) {
       expect(await as(who, (tx) => tx.task.count())).toBe(0);
     }
     expect(await as("boss", (tx) => tx.task.count())).toBe(1);
+    expect(await as("hr", (tx) => tx.task.count())).toBe(1);
+    expect(await as("hr", (tx) => tx.task.updateMany({ data: { title: "HR edit" } }))).toEqual({ count: 0 });
   });
 
   it("only lets an active member own a task", async () => {
@@ -454,7 +464,7 @@ describe("Dashboard (PRD/OVERVIEW-SPEC.md)", () => {
       SELECT user_id::text, open_tasks, overdue_tasks, done_this_month
       FROM app.task_summary_per_person('2026-10-16'::date, '2026-10-01'::date, '2026-10-31'::date)`;
 
-  it("gives HR and C-Level task counts per person (HR still can't read tasks)", async () => {
+  it("gives HR and C-Level task counts per person", async () => {
     await prisma.task.create({
       data: { projectId: projectA, sectionId: sectionA, title: "Late hero", ownerId: ids.dev, dueDate: new Date("2026-10-01"), createdBy: ids.pm },
     });
@@ -464,7 +474,6 @@ describe("Dashboard (PRD/OVERVIEW-SPEC.md)", () => {
     expect(dev?.open_tasks).toBeGreaterThanOrEqual(dev!.overdue_tasks);
     expect(hr.some((r) => r.user_id === ids.gone)).toBe(false); // active people only
     expect((await as("boss", summary)).length).toBe(hr.length);
-    expect(await as("hr", (tx) => tx.task.count())).toBe(0);
   });
 
   it("returns nothing to the other roles", async () => {

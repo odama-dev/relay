@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/auth";
 import { perms, USER_ROLES, roleLabel } from "@/lib/roles";
-import { listPeople, parsePeopleFilters } from "@/lib/people/queries";
+import { jobRoleOptions, listPeople, parsePeopleFilters } from "@/lib/people/queries";
 import { PageHeader } from "@/components/page-header";
 import { FilterBar } from "@/components/filter-bar";
 import { PeopleTable } from "./people-table";
@@ -14,9 +14,9 @@ export default async function PeoplePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await requireUser();
-  const canManage = perms.managePeople(user);
+  const canManage = perms.managePeople(user) || perms.managePeopleModule(user);
   const filters = parsePeopleFilters(await searchParams, canManage);
-  const people = await listPeople(user, filters);
+  const [people, jobRoles] = await Promise.all([listPeople(user, filters), canManage ? jobRoleOptions(user) : []]);
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
@@ -61,6 +61,8 @@ export default async function PeoplePage({
           currentUserId={user.id}
           canManage={canManage}
           isAdmin={user.isAdmin}
+          canManagePeopleModule={perms.managePeopleModule(user)}
+          jobRoles={jobRoles}
         />
       </div>
     </div>

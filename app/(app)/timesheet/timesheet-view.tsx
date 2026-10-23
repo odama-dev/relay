@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import type { EntryView, Timesheet } from "@/lib/time/queries";
+import type { CorrectionView, EntryView, Timesheet } from "@/lib/time/queries";
 import { addDays, weekStart } from "@/lib/time/pure";
 import { formatDate, formatDuration, formatHours, formatWeekday, formatRelative } from "@/lib/format";
 import { useOpenFromUrl } from "@/lib/hooks/use-open-from-url";
@@ -14,7 +14,7 @@ import { PillButton } from "@/components/pill-button";
 import { RowActions } from "@/components/row-actions";
 import { StatusBadge } from "@/components/status-badge";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { Icon } from "@/components/icon";
+import { Icon, icons } from "@/components/icon";
 import { cn } from "@/lib/utils";
 
 type Dialog = { mode: "create" | "edit" | "correct" | "add-correction"; initial?: EntryDraft } | null;
@@ -28,6 +28,13 @@ const draftOf = (e: EntryView): EntryDraft => ({
   note: e.note,
   outOfScope: e.oosStatus === "pending" || e.oosStatus === "approved",
 });
+
+const correctionSummary = (c: CorrectionView) => {
+  const on = c.entryDate ? ` on ${formatDate(c.entryDate)}` : "";
+  if (c.kind === "remove") return `Remove entry${on}`;
+  const length = c.minutes != null ? formatDuration(c.minutes) : "time";
+  return c.kind === "change" ? `Change to ${length}${on}` : `Add ${length}${on}`;
+};
 
 /** M3.4 — the week Monday–Sunday: totals per day and week, empty workdays flagged. */
 export function TimesheetView({ sheet }: { sheet: Timesheet }) {
@@ -110,32 +117,34 @@ export function TimesheetView({ sheet }: { sheet: Timesheet }) {
             </span>
             <span className="bg-foreground/25 size-[3px] rounded-full" aria-hidden />
             <span className={cn("tabular text-muted-foreground text-body", d.minutes > 0 && "text-foreground", d.missing && sheet.mustLog && "text-warning")}>
-              {d.minutes ? formatHours(d.minutes) : d.missing && sheet.mustLog ? "Missing" : "—"}
+              {d.minutes || (d.missing && sheet.mustLog) ? formatHours(d.minutes) : "—"}
             </span>
           </div>
         ))}
       </div>
 
-      <div className="flex flex-col gap-5">
+      <div className="flex flex-col divide-y divide-black/6 dark:divide-white/8">
         {sheet.days
           .filter((d) => d.entries.length > 0 || (d.missing && sheet.mustLog))
           .map((d) => (
-            <section key={d.date} className="flex flex-col gap-1">
-              <h3 className="flex items-baseline gap-2 px-1 text-body font-medium">
-                {formatWeekday(d.date)}
-                <span className="text-muted-foreground tabular text-caption font-normal">{formatHours(d.minutes)}</span>
-                {d.missing && sheet.mustLog && <span className="text-warning text-caption font-normal">No time logged</span>}
+            <section key={d.date} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
+              <div className="flex min-h-7 items-center gap-2">
+                <h3 className="text-body font-medium">{formatWeekday(d.date)}</h3>
+                {d.missing && sheet.mustLog ? (
+                  <span className="text-warning text-caption">No time logged</span>
+                ) : (
+                  <span className="text-muted-foreground tabular text-caption">{formatHours(d.minutes)}</span>
+                )}
                 {!sheet.locked && (
-                  <Button variant="ghost" size="compact" className="ml-auto" onClick={() => setDialog({ mode: "create", initial: { entryDate: d.date } })}>
-                    <Icon name="add" size={12} />
+                  <Button variant="ghost" size="compact" leadingIcon={icons.add} className="ml-auto" onClick={() => setDialog({ mode: "create", initial: { entryDate: d.date } })}>
                     Add
                   </Button>
                 )}
-              </h3>
+              </div>
               {d.entries.length > 0 && (
                 <ul className="flex flex-col divide-y divide-black/4 dark:divide-white/5">
                   {d.entries.map((e) => (
-                    <li key={e.id} className="flex items-center gap-3 rounded-lg px-3 py-2 text-body">
+                    <li key={e.id} className="flex items-center gap-3 py-2 text-body">
                       <span className="tabular w-16 shrink-0 font-medium">{formatDuration(e.minutes)}</span>
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate">
@@ -167,16 +176,18 @@ export function TimesheetView({ sheet }: { sheet: Timesheet }) {
       </div>
 
       {sheet.corrections.length > 0 && (
-        <section className="flex flex-col gap-2">
+        <section className="bleed flex flex-col gap-1 border-t border-black/6 pt-5 dark:border-white/8">
           <h3 className="text-body font-medium">Your correction requests</h3>
-          <ul className="flex flex-col gap-1 text-body">
+          <ul className="flex flex-col divide-y divide-black/6 text-body dark:divide-white/8">
             {sheet.corrections.map((c) => (
-              <li key={c.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
-                <StatusBadge value={c.status} />
-                <span>{c.summary}</span>
-                <span className="text-muted-foreground">— {c.reason}</span>
-                {c.reviewNote && <span className="text-muted-foreground">· “{c.reviewNote}”</span>}
-                <span className="text-muted-foreground text-caption">{formatRelative(c.createdAt)}</span>
+              <li key={c.id} className="grid grid-cols-[5.5rem_minmax(0,1fr)_auto] items-start gap-x-3 py-2">
+                <StatusBadge value={c.status} className="justify-self-start" />
+                <span className="flex min-w-0 flex-col">
+                  <span>{correctionSummary(c)}</span>
+                  <span className="text-muted-foreground text-caption">{c.reason}</span>
+                  {c.reviewNote && <span className="text-muted-foreground text-caption">Reviewer: “{c.reviewNote}”</span>}
+                </span>
+                <span className="text-muted-foreground text-caption whitespace-nowrap">{formatRelative(c.createdAt)}</span>
               </li>
             ))}
           </ul>

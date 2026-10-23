@@ -3,7 +3,7 @@ import { cache } from "react";
 import { randomUUID } from "node:crypto";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import type { Profile } from "@prisma/client";
+import type { AppModule, Profile } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withRls, type Tx } from "@/lib/db";
 import type { Viewer } from "@/lib/roles";
@@ -18,13 +18,19 @@ export type CurrentUser = Viewer & {
   timezone: string;
 };
 
-function toCurrentUser(p: Profile): CurrentUser {
+type ProfileWithModules = Profile & { modules: { module: AppModule }[] };
+
+const withModules = { modules: { select: { module: true } } } as const;
+
+function toCurrentUser(p: ProfileWithModules): CurrentUser {
   return {
     id: p.id,
     email: p.email,
     fullName: p.fullName,
     role: p.role,
     isAdmin: p.isAdmin,
+    accessLevel: p.accessLevel,
+    modules: p.modules.map((m) => m.module),
     avatarUrl: p.avatarUrl,
     timezone: p.timezone,
   };
@@ -34,9 +40,10 @@ function toCurrentUser(p: Profile): CurrentUser {
  * Bootstrap admin: an ADMIN_EMAILS address that signs in with no profile yet
  * becomes an active C-Level admin. Everyone else must be invited (M0.1).
  */
-async function bootstrapAdmin(id: string, email: string): Promise<Profile | null> {
+async function bootstrapAdmin(id: string, email: string): Promise<ProfileWithModules | null> {
   if (!adminEmails.includes(email)) return null;
   return prisma.profile.upsert({
+    include: withModules,
     where: { id },
     create: {
       id,
@@ -53,15 +60,16 @@ async function bootstrapAdmin(id: string, email: string): Promise<Profile | null
 /** Signed-in identity → active profile. Invited and deactivated users get null. */
 async function resolve(authUserId: string, email: string): Promise<CurrentUser | null> {
   const normalized = email.toLowerCase();
-  let profile = await prisma.profile.findUnique({ where: { id: authUserId } });
+  let profile = await prisma.profile.findUnique({ where: { id: authUserId }, include: withModules });
   profile ??= await bootstrapAdmin(authUserId, normalized);
   if (!profile || profile.status !== "active") return null;
   return toCurrentUser(profile);
 }
 
 async function resolveDev(): Promise<CurrentUser | null> {
-  let profile = await prisma.profile.findUnique({ where: { email: devAuthEmail } });
+  let profile = await prisma.profile.findUnique({ where: { email: devAuthEmail }, include: withModules });
   profile ??= await prisma.profile.create({
+    include: withModules,
     data: {
       id: randomUUID(),
       email: devAuthEmail,

@@ -121,6 +121,8 @@ enum InvoiceStatus {
   draft
   sent
   partially_paid
+  /// Phase 2: Sales uploaded a payment proof; Finance verifies it.
+  payment_submitted
   paid
   overdue
   void
@@ -159,6 +161,96 @@ enum ExpenseCategory {
   @@map("expense_category")
 }
 
+/// How an HR calendar event repeats; it stops after `repeat_until`.
+enum HrEventRecurrence {
+  none
+  weekly
+  monthly
+
+  @@map("hr_event_recurrence")
+}
+
+/// The label colour of an HR calendar event.
+enum HrEventColor {
+  gray
+  blue
+  green
+  amber
+  red
+  purple
+  teal
+
+  @@map("hr_event_color")
+}
+
+enum LeaveKind {
+  annual_leave
+  permit
+  sick
+  other
+
+  @@map("leave_kind")
+}
+
+enum LeaveStatus {
+  pending
+  approved
+  rejected
+  cancelled
+
+  @@map("leave_status")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — M6 Foundation (PRD/PRD_Fase-2.md "Role & akses", "Task")
+// ---------------------------------------------------------------------------
+
+/// Division: the base KPI template and default widgets (PRD Phase 2).
+enum Division {
+  design
+  development
+  project
+  sales
+  people
+  finance
+  executive
+
+  @@map("division")
+}
+
+/// Access next to the admin flag: a manager sees their reports' data.
+enum AccessLevel {
+  manager
+  member
+
+  @@map("access_level")
+}
+
+/// Modules granted per person on top of access.
+enum AppModule {
+  people
+  finance
+  sales
+  studio_report
+
+  @@map("app_module")
+}
+
+enum ReviewDecision {
+  approved
+  changes_requested
+
+  @@map("review_decision")
+}
+
+enum AttendanceStatus {
+  present
+  remote
+  off
+
+  @@map("attendance_status")
+}
+
 // ---------------------------------------------------------------------------
 // M0 — Foundation
 // ---------------------------------------------------------------------------
@@ -178,26 +270,34 @@ model Profile {
   /// Notification types this user turned off (M0.6, optional).
   mutedNotifications String[]       @default([]) @map("muted_notifications")
   deactivatedAt      DateTime?      @map("deactivated_at") @db.Timestamptz
+  /// Phase 2: job role (catalogue), division, level 1–5, free job title,
+  /// access and direct manager. `role` stays as the dashboard preset.
+  jobRoleId          String?        @map("job_role_id") @db.Uuid
+  division           Division?
+  level              Int?           @db.SmallInt
+  jobTitle           String?        @map("job_title")
+  accessLevel        AccessLevel    @default(member) @map("access_level")
+  managerId          String?        @map("manager_id") @db.Uuid
   createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz
   updatedAt          DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  invitations          UserInvitation[]     @relation("InvitationUser")
-  invitationsSent      UserInvitation[]     @relation("InvitationSender")
+  invitations          UserInvitation[]       @relation("InvitationUser")
+  invitationsSent      UserInvitation[]       @relation("InvitationSender")
   clientsCreated       Client[]
-  projectsManaged      Project[]            @relation("ProjectPm")
-  projectsCreated      Project[]            @relation("ProjectCreator")
-  memberships          ProjectMember[]      @relation("Member")
-  membershipsAdded     ProjectMember[]      @relation("MemberAddedBy")
-  tasksOwned           Task[]               @relation("TaskOwner")
-  tasksCreated         Task[]               @relation("TaskCreator")
+  projectsManaged      Project[]              @relation("ProjectPm")
+  projectsCreated      Project[]              @relation("ProjectCreator")
+  memberships          ProjectMember[]        @relation("Member")
+  membershipsAdded     ProjectMember[]        @relation("MemberAddedBy")
+  tasksOwned           Task[]                 @relation("TaskOwner")
+  tasksCreated         Task[]                 @relation("TaskCreator")
   collaborations       TaskCollaborator[]
-  comments             TaskComment[]        @relation("CommentAuthor")
-  commentsDeleted      TaskComment[]        @relation("CommentDeleter")
+  comments             TaskComment[]          @relation("CommentAuthor")
+  commentsDeleted      TaskComment[]          @relation("CommentDeleter")
   taskActivity         TaskActivity[]
-  timeEntries          TimeEntry[]          @relation("EntryUser")
-  oosReviews           TimeEntry[]          @relation("OosReviewer")
-  correctionsRequested TimeCorrection[]     @relation("CorrectionRequester")
-  correctionsReviewed  TimeCorrection[]     @relation("CorrectionReviewer")
+  timeEntries          TimeEntry[]            @relation("EntryUser")
+  oosReviews           TimeEntry[]            @relation("OosReviewer")
+  correctionsRequested TimeCorrection[]       @relation("CorrectionRequester")
+  correctionsReviewed  TimeCorrection[]       @relation("CorrectionReviewer")
   invoicesCreated      Invoice[]
   deliveriesSent       InvoiceDelivery[]
   paymentsMatched      Payment[]
@@ -208,7 +308,45 @@ model Profile {
   capacityOverrides    CapacityOverride[]
   utilizationOverride  UtilizationOverride?
   expensesRecorded     Expense[]
+  hrEventsCreated      HrEvent[]
+  leaveRequests        LeaveRequest[]         @relation("LeaveRequester")
+  leaveDecisions       LeaveRequest[]         @relation("LeaveDecider")
+  jobRole              JobRole?               @relation(fields: [jobRoleId], references: [id], onDelete: SetNull)
+  manager              Profile?               @relation("ProfileManager", fields: [managerId], references: [id], onDelete: SetNull)
+  reports              Profile[]              @relation("ProfileManager")
+  modules              ModuleGrant[]          @relation("ModuleGrantee")
+  modulesGranted       ModuleGrant[]          @relation("ModuleGranter")
+  tasksToReview        Task[]                 @relation("TaskReviewer")
+  reviewRounds         ReviewRound[]
+  dueChangesRequested  DueDateChange[]        @relation("DueChangeRequester")
+  dueChangesDecided    DueDateChange[]        @relation("DueChangeDecider")
+  dueChangesRejected   DueDateChange[]        @relation("DueChangeRejecter")
+  attendance           Attendance[]
+  workLogs             WorkLog[]              @relation("WorkLogSubject")
+  workLogsReviewed     WorkLog[]              @relation("WorkLogReviewer")
+  workLogsCreated      WorkLog[]              @relation("WorkLogCreator")
+  ratingsReceived      RatingResponse[]       @relation("RatingSubject")
+  ratingsGiven         RatingResponse[]       @relation("RatingRater")
+  ratingRaterSubjects  RatingFormRater[]      @relation("RatingSubjectAssigned")
+  ratingRaterOf        RatingFormRater[]      @relation("RatingRaterAssigned")
+  manualEntries        ManualEntry[]          @relation("ManualEntrySubject")
+  manualEntriesMade    ManualEntry[]          @relation("ManualEntryRecorder")
+  kpiAssignments       KpiAssignment[]        @relation("KpiAssignee")
+  kpiResults           KpiResult[]            @relation("KpiResultSubject")
+  objectionsMade       KpiObjection[]         @relation("ObjectionCreator")
+  objectionsDecided    KpiObjection[]         @relation("ObjectionDecider")
+  objectivesOwned      ObjectiveOwner[]       @relation("ObjectiveOwnerUser")
+  keyResultsToApprove  KeyResult[]            @relation("KrApprover")
+  dealsOwned           Deal[]                 @relation("DealOwner")
+  proofsSubmitted      PaymentProof[]         @relation("ProofSubmitter")
+  proofsReviewed       PaymentProof[]         @relation("ProofReviewer")
+  obligationsDone      ObligationCompletion[]
+  crmCompanies         CrmCompany[]           @relation("CrmCompanyCreator")
+  crmPeople            CrmPerson[]            @relation("CrmPersonCreator")
+  crmCompaniesOwned    CrmCompany[]           @relation("CrmCompanyOwner")
+  crmPeopleOwned       CrmPerson[]            @relation("CrmPersonOwner")
 
+  @@index([managerId])
   @@map("profiles")
 }
 
@@ -318,10 +456,12 @@ model Client {
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  creator  Profile?        @relation(fields: [createdBy], references: [id])
-  contacts ClientContact[]
-  projects Project[]
-  invoices Invoice[]
+  creator    Profile?        @relation(fields: [createdBy], references: [id])
+  contacts   ClientContact[]
+  projects   Project[]
+  deals      Deal[]
+  invoices   Invoice[]
+  crmCompany CrmCompany?
 
   @@map("clients")
 }
@@ -343,23 +483,25 @@ model ClientContact {
 }
 
 model Project {
-  id           String        @id @default(uuid()) @db.Uuid
+  id            String        @id @default(uuid()) @db.Uuid
   /// ACME-001 / INT-001 — assigned by the `projects_assign_code` trigger.
-  code         String        @unique @default("")
-  name         String
-  kind         ProjectKind
-  clientId     String?       @map("client_id") @db.Uuid
-  contractType ContractType? @map("contract_type")
-  currency     String        @default("IDR")
-  pmId         String        @map("pm_id") @db.Uuid
-  status       ProjectStatus @default(active)
-  startDate    DateTime      @map("start_date") @db.Date
-  endDate      DateTime?     @map("end_date") @db.Date
+  code          String        @unique @default("")
+  name          String
+  kind          ProjectKind
+  clientId      String?       @map("client_id") @db.Uuid
+  contractType  ContractType? @map("contract_type")
+  currency      String        @default("IDR")
+  pmId          String        @map("pm_id") @db.Uuid
+  status        ProjectStatus @default(active)
+  startDate     DateTime      @map("start_date") @db.Date
+  endDate       DateTime?     @map("end_date") @db.Date
   /// { notion, figma, drive, slack_channel }
-  links        Json          @default("{}")
-  createdBy    String?       @map("created_by") @db.Uuid
-  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  links         Json          @default("{}")
+  /// The project's dot on the calendars; null = picked from the id.
+  calendarColor HrEventColor? @map("calendar_color")
+  createdBy     String?       @map("created_by") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   client          Client?          @relation(fields: [clientId], references: [id], onDelete: Restrict)
   pm              Profile          @relation("ProjectPm", fields: [pmId], references: [id])
@@ -371,6 +513,8 @@ model Project {
   tasks           Task[]
   timeEntries     TimeEntry[]
   corrections     TimeCorrection[]
+  deal            Deal?
+  workLogs        WorkLog[]
   alerts          ProjectAlert[]
   retainerPeriods RetainerPeriod[]
   invoices        Invoice[]
@@ -451,24 +595,37 @@ model Section {
 }
 
 model Task {
-  id            String       @id @default(uuid()) @db.Uuid
-  projectId     String       @map("project_id") @db.Uuid
-  sectionId     String       @map("section_id") @db.Uuid
-  title         String
+  id              String       @id @default(uuid()) @db.Uuid
+  projectId       String       @map("project_id") @db.Uuid
+  sectionId       String       @map("section_id") @db.Uuid
+  title           String
   /// Tiptap/ProseMirror JSON — never raw HTML (M2.5).
-  description   Json?
-  ownerId       String?      @map("owner_id") @db.Uuid
-  priority      TaskPriority @default(normal)
-  status        TaskStatus   @default(todo)
-  dueDate       DateTime?    @map("due_date") @db.Date
-  estimateHours Decimal?     @map("estimate_hours") @db.Decimal(8, 2)
+  description     Json?
+  ownerId         String?      @map("owner_id") @db.Uuid
+  priority        TaskPriority @default(normal)
+  status          TaskStatus   @default(todo)
+  dueDate         DateTime?    @map("due_date") @db.Date
+  estimateHours   Decimal?     @map("estimate_hours") @db.Decimal(8, 2)
   /// Fractional so a drag only rewrites the moved row.
-  position      Float        @default(0)
-  createdBy     String?      @map("created_by") @db.Uuid
-  completedAt   DateTime?    @map("completed_at") @db.Timestamptz
-  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt     DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  position        Float        @default(0)
+  createdBy       String?      @map("created_by") @db.Uuid
+  completedAt     DateTime?    @map("completed_at") @db.Timestamptz
+  /// Phase 2: task type, reviewer, deliverable link, the first due date
+  /// (locked) and when the reviewer approved it.
+  typeId          String?      @map("type_id") @db.Uuid
+  reviewerId      String?      @map("reviewer_id") @db.Uuid
+  deliverableUrl  String?      @map("deliverable_url")
+  originalDueDate DateTime?    @map("original_due_date") @db.Date
+  approvedAt      DateTime?    @map("approved_at") @db.Timestamptz
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
+  type          TaskType?          @relation(fields: [typeId], references: [id])
+  workLogs      WorkLog[]
+  krLinks       KrLink[]
+  reviewer      Profile?           @relation("TaskReviewer", fields: [reviewerId], references: [id])
+  reviewRounds  ReviewRound[]
+  dueChanges    DueDateChange[]
   project       Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
   section       Section            @relation(fields: [sectionId], references: [id])
   owner         Profile?           @relation("TaskOwner", fields: [ownerId], references: [id])
@@ -480,6 +637,7 @@ model Task {
 
   @@index([projectId, sectionId])
   @@index([ownerId])
+  @@index([reviewerId])
   @@map("tasks")
 }
 
@@ -677,30 +835,34 @@ model InvoiceSequence {
 }
 
 model Invoice {
-  id                String        @id @default(uuid()) @db.Uuid
+  id                String          @id @default(uuid()) @db.Uuid
   /// ODAMA/26/0001 — assigned when the invoice is first sent; null while Draft.
-  number            String?       @unique
-  projectId         String        @map("project_id") @db.Uuid
-  clientId          String        @map("client_id") @db.Uuid
+  number            String?         @unique
+  projectId         String          @map("project_id") @db.Uuid
+  clientId          String          @map("client_id") @db.Uuid
   currency          String
-  issueDate         DateTime      @map("issue_date") @db.Date
-  status            InvoiceStatus @default(draft)
+  issueDate         DateTime        @map("issue_date") @db.Date
+  status            InvoiceStatus   @default(draft)
   notes             String?
   /// Bill-to snapshot (client name, address, email) taken from the client.
-  billToName        String        @map("bill_to_name")
-  billToAddress     String?       @map("bill_to_address")
-  billToEmail       String?       @map("bill_to_email")
-  subtotal          Decimal       @default(0) @db.Decimal(18, 2)
-  total             Decimal       @default(0) @db.Decimal(18, 2)
-  amountPaid        Decimal       @default(0) @map("amount_paid") @db.Decimal(18, 2)
-  pdfPath           String?       @map("pdf_path")
-  sentAt            DateTime?     @map("sent_at") @db.Timestamptz
-  voidedAt          DateTime?     @map("voided_at") @db.Timestamptz
+  billToName        String          @map("bill_to_name")
+  billToAddress     String?         @map("bill_to_address")
+  billToEmail       String?         @map("bill_to_email")
+  subtotal          Decimal         @default(0) @db.Decimal(18, 2)
+  total             Decimal         @default(0) @db.Decimal(18, 2)
+  amountPaid        Decimal         @default(0) @map("amount_paid") @db.Decimal(18, 2)
+  pdfPath           String?         @map("pdf_path")
+  sentAt            DateTime?       @map("sent_at") @db.Timestamptz
+  voidedAt          DateTime?       @map("voided_at") @db.Timestamptz
   /// Last overdue Slack notice (first day, then weekly — M5.8).
-  overdueNotifiedAt DateTime?     @map("overdue_notified_at") @db.Timestamptz
-  createdBy         String?       @map("created_by") @db.Uuid
-  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  overdueNotifiedAt DateTime?       @map("overdue_notified_at") @db.Timestamptz
+  /// Phase 2: down payment / term / final, where it's paid, and the IDR rate on the day it was issued.
+  kind              InvoiceKind?
+  platform          PaymentPlatform @default(xendit)
+  fxRateAtIssue     Decimal?        @map("fx_rate_at_issue") @db.Decimal(18, 6)
+  createdBy         String?         @map("created_by") @db.Uuid
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   project         Project                 @relation(fields: [projectId], references: [id])
   client          Client                  @relation(fields: [clientId], references: [id])
@@ -709,6 +871,7 @@ model Invoice {
   paymentRequests InvoicePaymentRequest[]
   deliveries      InvoiceDelivery[]
   payments        Payment[]
+  proofs          PaymentProof[]
 
   @@index([projectId])
   @@index([clientId])
@@ -750,8 +913,9 @@ model InvoicePaymentRequest {
   createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  invoice  Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice  Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   payments Payment[]
+  proofs   PaymentProof[]
 
   @@index([invoiceId])
   @@map("invoice_payment_requests")
@@ -799,12 +963,16 @@ model Payment {
   raw                 Json
   matchedBy           String?   @map("matched_by") @db.Uuid
   matchedAt           DateTime? @map("matched_at") @db.Timestamptz
+  /// "xendit" (webhook) or "manual" (a verified payment proof).
+  source              String    @default("xendit")
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   paymentRequest InvoicePaymentRequest? @relation(fields: [paymentRequestId], references: [id])
   invoice        Invoice?               @relation(fields: [invoiceId], references: [id])
   matcher        Profile?               @relation(fields: [matchedBy], references: [id])
+
+  proof PaymentProof?
 
   @@index([invoiceId])
   @@index([paymentRequestId])
@@ -882,20 +1050,105 @@ model PersonCapacity {
 
 /// Leave, sickness or a temporary change: replaces the available hours of a period (§3.2).
 model CapacityOverride {
-  id             String   @id @default(uuid()) @db.Uuid
-  userId         String   @map("user_id") @db.Uuid
-  periodStart    DateTime @map("period_start") @db.Date
-  periodEnd      DateTime @map("period_end") @db.Date
-  availableHours Decimal  @map("available_hours") @db.Decimal(8, 2)
+  id             String     @id @default(uuid()) @db.Uuid
+  userId         String     @map("user_id") @db.Uuid
+  periodStart    DateTime   @map("period_start") @db.Date
+  periodEnd      DateTime   @map("period_end") @db.Date
+  availableHours Decimal    @map("available_hours") @db.Decimal(8, 2)
   reason         String?
-  createdBy      String?  @map("created_by") @db.Uuid
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  /// Set when the override is time off; NULL for any other change of hours.
+  kind           LeaveKind?
+  /// The approved leave request that created it (kept in sync by a trigger).
+  leaveRequestId String?    @unique @map("leave_request_id") @db.Uuid
+  createdBy      String?    @map("created_by") @db.Uuid
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         Profile       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leaveRequest LeaveRequest? @relation(fields: [leaveRequestId], references: [id], onDelete: Cascade)
 
   @@index([userId, periodStart])
   @@map("capacity_overrides")
+}
+
+// ---------------------------------------------------------------------------
+// HR — calendar and leave
+// ---------------------------------------------------------------------------
+
+/// HR's own timeline (monthly report, BPJS payment, …). HR only.
+model HrEvent {
+  id          String            @id @default(uuid()) @db.Uuid
+  title       String
+  notes       String?
+  color       HrEventColor      @default(blue)
+  startDate   DateTime          @map("start_date") @db.Date
+  endDate     DateTime          @map("end_date") @db.Date
+  allDay      Boolean           @default(true) @map("all_day")
+  /// "HH:MM" in the studio's time zone; NULL when all day.
+  startTime   String?           @map("start_time")
+  endTime     String?           @map("end_time")
+  recurrence  HrEventRecurrence @default(none)
+  /// Last day an occurrence may start on; NULL repeats with no end.
+  repeatUntil DateTime?         @map("repeat_until") @db.Date
+  createdBy   String?           @map("created_by") @db.Uuid
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  creator    Profile?           @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  exceptions HrEventException[]
+
+  @@index([startDate])
+  @@map("hr_events")
+}
+
+/// One occurrence of a repeating event skipped or changed ("only this one").
+model HrEventException {
+  id             String        @id @default(uuid()) @db.Uuid
+  eventId        String        @map("event_id") @db.Uuid
+  /// The start date the series would have given this occurrence.
+  occurrenceDate DateTime      @map("occurrence_date") @db.Date
+  cancelled      Boolean       @default(false)
+  title          String?
+  notes          String?
+  color          HrEventColor?
+  startDate      DateTime?     @map("start_date") @db.Date
+  endDate        DateTime?     @map("end_date") @db.Date
+  allDay         Boolean?      @map("all_day")
+  startTime      String?       @map("start_time")
+  endTime        String?       @map("end_time")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  event HrEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, occurrenceDate])
+  @@map("hr_event_exceptions")
+}
+
+/// Time off asked for by a member and decided by HR; approval writes the capacity override.
+model LeaveRequest {
+  id           String      @id @default(uuid()) @db.Uuid
+  userId       String      @map("user_id") @db.Uuid
+  kind         LeaveKind
+  startDate    DateTime    @map("start_date") @db.Date
+  endDate      DateTime    @map("end_date") @db.Date
+  /// Half a day off (single-day requests only).
+  halfDay      Boolean     @default(false) @map("half_day")
+  reason       String?
+  status       LeaveStatus @default(pending)
+  decidedBy    String?     @map("decided_by") @db.Uuid
+  decidedAt    DateTime?   @map("decided_at") @db.Timestamptz
+  decisionNote String?     @map("decision_note")
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user     Profile           @relation("LeaveRequester", fields: [userId], references: [id], onDelete: Cascade)
+  decider  Profile?          @relation("LeaveDecider", fields: [decidedBy], references: [id], onDelete: SetNull)
+  override CapacityOverride?
+
+  @@index([userId, startDate])
+  @@index([status])
+  @@map("leave_requests")
 }
 
 /// Billable-hours target per role (§3.3); C-Level isn't counted.
@@ -945,4 +1198,907 @@ model FxReferenceRate {
 
   @@unique([currency, effectiveFrom])
   @@map("fx_reference_rates")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — M6 Foundation
+// ---------------------------------------------------------------------------
+
+/// Job role catalogue (PRD Phase 2 "role" = division + level + title).
+model JobRole {
+  id             String      @id @default(uuid()) @db.Uuid
+  name           String      @unique
+  division       Division
+  level          Int         @db.SmallInt
+  defaultAccess  AccessLevel @default(member) @map("default_access")
+  defaultModules AppModule[] @default([]) @map("default_modules")
+  hasOkr         Boolean     @default(false) @map("has_okr")
+  archivedAt     DateTime?   @map("archived_at") @db.Timestamptz
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  people         Profile[]
+  kpiAssignments KpiAssignment[]
+
+  @@map("job_roles")
+}
+
+/// A module ticked for one person (People, Finance, Sales, Studio Report).
+model ModuleGrant {
+  userId    String    @map("user_id") @db.Uuid
+  module    AppModule
+  grantedBy String?   @map("granted_by") @db.Uuid
+  grantedAt DateTime  @default(now()) @map("granted_at") @db.Timestamptz
+
+  user    Profile  @relation("ModuleGrantee", fields: [userId], references: [id], onDelete: Cascade)
+  granter Profile? @relation("ModuleGranter", fields: [grantedBy], references: [id], onDelete: SetNull)
+
+  @@id([userId, module])
+  @@map("module_grants")
+}
+
+/// Task types (Regular, Revision, Bug, Report, Content; HR / admin add more).
+model TaskType {
+  id         String    @id @default(uuid()) @db.Uuid
+  name       String    @unique
+  /// Stable key the KPI metrics filter on (`content`, `bug`…).
+  key        String    @unique
+  position   Int       @default(0)
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  tasks Task[]
+
+  @@map("task_types")
+}
+
+/// One review round: submitted for review → approved or sent back.
+model ReviewRound {
+  id            String          @id @default(uuid()) @db.Uuid
+  taskId        String          @map("task_id") @db.Uuid
+  reviewerId    String?         @map("reviewer_id") @db.Uuid
+  submittedAt   DateTime        @default(now()) @map("submitted_at") @db.Timestamptz
+  /// One working day after submission.
+  slaDueAt      DateTime        @map("sla_due_at") @db.Timestamptz
+  decidedAt     DateTime?       @map("decided_at") @db.Timestamptz
+  decidedBy     String?         @map("decided_by") @db.Uuid
+  decision      ReviewDecision?
+  note          String?
+  slaNotifiedAt DateTime?       @map("sla_notified_at") @db.Timestamptz
+
+  task     Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  reviewer Profile? @relation(fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([taskId, submittedAt])
+  @@index([reviewerId, decidedAt])
+  @@map("review_rounds")
+}
+
+/// A due date change with its reason; counts only when the PM approved it
+/// before the due date passed.
+model DueDateChange {
+  id          String    @id @default(uuid()) @db.Uuid
+  taskId      String    @map("task_id") @db.Uuid
+  fromDate    DateTime? @map("from_date") @db.Date
+  toDate      DateTime  @map("to_date") @db.Date
+  reason      String
+  requestedBy String?   @map("requested_by") @db.Uuid
+  approvedBy  String?   @map("approved_by") @db.Uuid
+  approvedAt  DateTime? @map("approved_at") @db.Timestamptz
+  rejectedAt  DateTime? @map("rejected_at") @db.Timestamptz
+  rejectedBy  String?   @map("rejected_by") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  requester Profile? @relation("DueChangeRequester", fields: [requestedBy], references: [id], onDelete: SetNull)
+  approver  Profile? @relation("DueChangeDecider", fields: [approvedBy], references: [id], onDelete: SetNull)
+  rejecter  Profile? @relation("DueChangeRejecter", fields: [rejectedBy], references: [id], onDelete: SetNull)
+
+  @@index([taskId])
+  @@map("due_date_changes")
+}
+
+/// National holidays: off the capacity and the review SLA's working days.
+model PublicHoliday {
+  date      DateTime @id @db.Date
+  name      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("public_holidays")
+}
+
+/// Daily check-in: "working today" no longer means "logged hours".
+model Attendance {
+  userId      String           @map("user_id") @db.Uuid
+  date        DateTime         @db.Date
+  status      AttendanceStatus
+  checkedInAt DateTime         @default(now()) @map("checked_in_at") @db.Timestamptz
+  note        String?
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, date])
+  @@map("attendance")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — M7 KPI & OKR (PRD/PRD_Fase-2.md "KPI & OKR builder")
+// ---------------------------------------------------------------------------
+
+/// What a log entry records — the OS-native data sources for KPI metrics.
+enum WorkLogKind {
+  shot
+  content
+  idea
+  support_request
+  qc_record
+  error
+  release
+  testimony
+  challenge
+
+  @@map("work_log_kind")
+}
+
+enum WorkLogStatus {
+  submitted
+  approved
+  rejected
+
+  @@map("work_log_status")
+}
+
+/// Draft → Active (from the next period) → Archived. Versions never change once active.
+enum DefinitionStatus {
+  draft
+  active
+  archived
+
+  @@map("definition_status")
+}
+
+enum KpiItemKind {
+  core
+  addon
+
+  @@map("kpi_item_kind")
+}
+
+enum ScorePeriod {
+  monthly
+  semester
+
+  @@map("score_period")
+}
+
+enum RatingFrequency {
+  weekly
+  monthly
+
+  @@map("rating_frequency")
+}
+
+/// Who rates: the direct manager, the person, peers on the same project that week, a job role, or named people.
+enum RaterKind {
+  manager
+  self
+  project_peer
+  job_role
+  assigned
+
+  @@map("rater_kind")
+}
+
+enum ObjectionStatus {
+  open
+  upheld
+  rejected
+
+  @@map("objection_status")
+}
+
+enum OkrCycleStatus {
+  draft
+  active
+  closed
+
+  @@map("okr_cycle_status")
+}
+
+enum ObjectiveStatus {
+  proposed
+  approved
+  archived
+
+  @@map("objective_status")
+}
+
+enum KeyResultKind {
+  milestone
+  count
+  percent
+  lower_better
+  kpi_linked
+
+  @@map("key_result_kind")
+}
+
+enum KeyResultSource {
+  metric
+  tasks
+  manual
+
+  @@map("key_result_source")
+}
+
+/// One logged piece of work: a shot, content, idea, support request, QC record, error, release, testimony or challenge.
+model WorkLog {
+  id           String        @id @default(uuid()) @db.Uuid
+  kind         WorkLogKind
+  /// Whose work it is (the KPI subject).
+  userId       String        @map("user_id") @db.Uuid
+  projectId    String?       @map("project_id") @db.Uuid
+  taskId       String?       @map("task_id") @db.Uuid
+  occurredOn   DateTime      @map("occurred_on") @db.Date
+  title        String
+  description  String?
+  tags         String[]      @default([])
+  link         String?
+  evidencePath String?       @map("evidence_path")
+  evidenceName String?       @map("evidence_name")
+  /// A count or score carried by the entry (revisions on a shot, bugs after a release).
+  value        Decimal?      @db.Decimal(12, 2)
+  /// The base for a ratio (tasks in a release).
+  total        Decimal?      @db.Decimal(12, 2)
+  status       WorkLogStatus @default(submitted)
+  reviewedBy   String?       @map("reviewed_by") @db.Uuid
+  reviewedAt   DateTime?     @map("reviewed_at") @db.Timestamptz
+  reviewNote   String?       @map("review_note")
+  /// Ideas: answered within 3 working days, or they count anyway.
+  responseDue  DateTime?     @map("response_due") @db.Date
+  createdBy    String?       @map("created_by") @db.Uuid
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user     Profile  @relation("WorkLogSubject", fields: [userId], references: [id], onDelete: Cascade)
+  project  Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  task     Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  reviewer Profile? @relation("WorkLogReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  creator  Profile? @relation("WorkLogCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([userId, kind, occurredOn])
+  @@index([status, kind])
+  @@map("work_logs")
+}
+
+/// A metric definition: source + filters + calculation + direction (never code).
+model Metric {
+  id          String           @id @default(uuid()) @db.Uuid
+  key         String           @unique
+  name        String
+  description String?
+  /// { source, scope, filters, part, aggregation, per, ... } — lib/kpi/definition.ts.
+  definition  Json
+  direction   String
+  unit        String           @default("")
+  /// Recorded by hand with evidence — "not automated yet".
+  manual      Boolean          @default(false)
+  status      DefinitionStatus @default(active)
+  createdBy   String?          @map("created_by") @db.Uuid
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  items         KpiItem[]
+  ratingForms   RatingForm[]
+  manualEntries ManualEntry[]
+  keyResults    KeyResult[]
+
+  @@map("metrics")
+}
+
+/// A rating form for rating metrics: criteria with a 1–5 scale, who rates, how often.
+model RatingForm {
+  id             String           @id @default(uuid()) @db.Uuid
+  metricId       String           @map("metric_id") @db.Uuid
+  name           String
+  frequency      RatingFrequency  @default(monthly)
+  raterKind      RaterKind        @map("rater_kind")
+  raterJobRoleId String?          @map("rater_job_role_id") @db.Uuid
+  /// Self-assessments are approved by the People module.
+  needsApproval  Boolean          @default(false) @map("needs_approval")
+  status         DefinitionStatus @default(active)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  metric    Metric            @relation(fields: [metricId], references: [id], onDelete: Cascade)
+  criteria  RatingCriterion[]
+  responses RatingResponse[]
+  raters    RatingFormRater[]
+
+  @@map("rating_forms")
+}
+
+model RatingCriterion {
+  id       String   @id @default(uuid()) @db.Uuid
+  formId   String   @map("form_id") @db.Uuid
+  title    String
+  /// Five descriptions, for scores 1 to 5.
+  scale    String[]
+  position Int      @default(0)
+
+  form RatingForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@map("rating_criteria")
+}
+
+/// Named raters for a subject (rater kind "assigned").
+model RatingFormRater {
+  formId    String @map("form_id") @db.Uuid
+  subjectId String @map("subject_id") @db.Uuid
+  raterId   String @map("rater_id") @db.Uuid
+
+  form    RatingForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  subject Profile    @relation("RatingSubjectAssigned", fields: [subjectId], references: [id], onDelete: Cascade)
+  rater   Profile    @relation("RatingRaterAssigned", fields: [raterId], references: [id], onDelete: Cascade)
+
+  @@id([formId, subjectId, raterId])
+  @@map("rating_form_raters")
+}
+
+model RatingResponse {
+  id          String    @id @default(uuid()) @db.Uuid
+  formId      String    @map("form_id") @db.Uuid
+  subjectId   String    @map("subject_id") @db.Uuid
+  raterId     String    @map("rater_id") @db.Uuid
+  /// First day of the rated week or month.
+  periodStart DateTime  @map("period_start") @db.Date
+  /// criterion id → 1..5
+  scores      Json
+  average     Decimal   @db.Decimal(4, 2)
+  comment     String?
+  approvedBy  String?   @map("approved_by") @db.Uuid
+  approvedAt  DateTime? @map("approved_at") @db.Timestamptz
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  form    RatingForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  subject Profile    @relation("RatingSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+  rater   Profile    @relation("RatingRater", fields: [raterId], references: [id], onDelete: Cascade)
+
+  @@unique([formId, subjectId, raterId, periodStart])
+  @@map("rating_responses")
+}
+
+/// A manual value with its evidence, for metrics the OS can't count yet.
+model ManualEntry {
+  id           String   @id @default(uuid()) @db.Uuid
+  metricId     String   @map("metric_id") @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  occurredOn   DateTime @map("occurred_on") @db.Date
+  value        Decimal  @db.Decimal(12, 2)
+  evidenceUrl  String?  @map("evidence_url")
+  evidencePath String?  @map("evidence_path")
+  note         String?
+  recordedBy   String?  @map("recorded_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  metric   Metric   @relation(fields: [metricId], references: [id], onDelete: Cascade)
+  user     Profile  @relation("ManualEntrySubject", fields: [userId], references: [id], onDelete: Cascade)
+  recorder Profile? @relation("ManualEntryRecorder", fields: [recordedBy], references: [id], onDelete: SetNull)
+
+  @@index([metricId, userId, occurredOn])
+  @@map("manual_entries")
+}
+
+/// A KPI template version: metrics + targets + score period + weights.
+model KpiTemplate {
+  id            String           @id @default(uuid()) @db.Uuid
+  /// Every version of one template shares the lineage id.
+  lineageId     String           @map("lineage_id") @db.Uuid
+  version       Int              @default(1)
+  name          String
+  kind          KpiItemKind      @default(core)
+  description   String?
+  status        DefinitionStatus @default(draft)
+  /// First day it counts (the start of the period after activation).
+  effectiveFrom DateTime?        @map("effective_from") @db.Date
+  createdBy     String?          @map("created_by") @db.Uuid
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  activatedAt   DateTime?        @map("activated_at") @db.Timestamptz
+  archivedAt    DateTime?        @map("archived_at") @db.Timestamptz
+
+  items KpiItem[]
+
+  @@unique([lineageId, version])
+  @@index([lineageId, status])
+  @@map("kpi_templates")
+}
+
+model KpiItem {
+  id          String      @id @default(uuid()) @db.Uuid
+  templateId  String      @map("template_id") @db.Uuid
+  metricId    String      @map("metric_id") @db.Uuid
+  /// Null for record-only items.
+  target      Decimal?    @db.Decimal(12, 2)
+  /// What the target counts over: "week" (average), "month", "semester".
+  targetPer   String      @default("month") @map("target_per")
+  scorePeriod ScorePeriod @default(monthly) @map("score_period")
+  weight      Decimal     @default(1) @db.Decimal(6, 2)
+  /// Shown, not scored.
+  recordOnly  Boolean     @default(false) @map("record_only")
+  /// A filter on top of the metric (e.g. idea tag "creative_leadership").
+  tag         String?
+  position    Int         @default(0)
+
+  template KpiTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  metric   Metric      @relation(fields: [metricId], references: [id])
+
+  @@map("kpi_items")
+}
+
+/// A template (lineage) attached to a job role, or overridden for one person.
+model KpiAssignment {
+  id        String      @id @default(uuid()) @db.Uuid
+  lineageId String      @map("lineage_id") @db.Uuid
+  kind      KpiItemKind @default(core)
+  jobRoleId String?     @map("job_role_id") @db.Uuid
+  userId    String?     @map("user_id") @db.Uuid
+  startsOn  DateTime    @map("starts_on") @db.Date
+  endsOn    DateTime?   @map("ends_on") @db.Date
+  createdBy String?     @map("created_by") @db.Uuid
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  jobRole JobRole? @relation(fields: [jobRoleId], references: [id], onDelete: Cascade)
+  user    Profile? @relation("KpiAssignee", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([lineageId])
+  @@map("kpi_assignments")
+}
+
+/// A scored period for one person: items, score, grade (a snapshot — never recomputed).
+model KpiResult {
+  id          String      @id @default(uuid()) @db.Uuid
+  userId      String      @map("user_id") @db.Uuid
+  periodKind  ScorePeriod @map("period_kind")
+  periodStart DateTime    @map("period_start") @db.Date
+  periodEnd   DateTime    @map("period_end") @db.Date
+  items       Json
+  score       Decimal?    @db.Decimal(5, 2)
+  grade       String?
+  /// Recorded during the 2-month calibration — doesn't affect reward.
+  calibration Boolean     @default(false)
+  computedAt  DateTime    @default(now()) @map("computed_at") @db.Timestamptz
+
+  user       Profile        @relation("KpiResultSubject", fields: [userId], references: [id], onDelete: Cascade)
+  objections KpiObjection[]
+
+  @@unique([userId, periodKind, periodStart])
+  @@map("kpi_results")
+}
+
+model KpiObjection {
+  id           String          @id @default(uuid()) @db.Uuid
+  resultId     String          @map("result_id") @db.Uuid
+  metricKey    String?         @map("metric_key")
+  reason       String
+  status       ObjectionStatus @default(open)
+  createdBy    String          @map("created_by") @db.Uuid
+  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  decidedBy    String?         @map("decided_by") @db.Uuid
+  decidedAt    DateTime?       @map("decided_at") @db.Timestamptz
+  decisionNote String?         @map("decision_note")
+
+  result  KpiResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  creator Profile   @relation("ObjectionCreator", fields: [createdBy], references: [id], onDelete: Cascade)
+  decider Profile?  @relation("ObjectionDecider", fields: [decidedBy], references: [id], onDelete: SetNull)
+
+  @@map("kpi_objections")
+}
+
+model OkrCycle {
+  id        String         @id @default(uuid()) @db.Uuid
+  name      String         @unique
+  startDate DateTime       @map("start_date") @db.Date
+  endDate   DateTime       @map("end_date") @db.Date
+  status    OkrCycleStatus @default(draft)
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  objectives Objective[]
+
+  @@map("okr_cycles")
+}
+
+model Objective {
+  id          String          @id @default(uuid()) @db.Uuid
+  cycleId     String          @map("cycle_id") @db.Uuid
+  title       String
+  description String?
+  /// A studio objective (C-Level, 2–3 per quarter).
+  isStudio    Boolean         @default(false) @map("is_studio")
+  parentId    String?         @map("parent_id") @db.Uuid
+  status      ObjectiveStatus @default(proposed)
+  proposedBy  String?         @map("proposed_by") @db.Uuid
+  approvedBy  String?         @map("approved_by") @db.Uuid
+  approvedAt  DateTime?       @map("approved_at") @db.Timestamptz
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  cycle      OkrCycle         @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  parent     Objective?       @relation("ObjectiveParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children   Objective[]      @relation("ObjectiveParent")
+  owners     ObjectiveOwner[]
+  keyResults KeyResult[]
+
+  @@index([cycleId])
+  @@map("objectives")
+}
+
+model ObjectiveOwner {
+  objectiveId String @map("objective_id") @db.Uuid
+  userId      String @map("user_id") @db.Uuid
+
+  objective Objective @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  user      Profile   @relation("ObjectiveOwnerUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([objectiveId, userId])
+  @@map("objective_owners")
+}
+
+model KeyResult {
+  id             String          @id @default(uuid()) @db.Uuid
+  objectiveId    String          @map("objective_id") @db.Uuid
+  title          String
+  kind           KeyResultKind
+  source         KeyResultSource @default(manual)
+  metricId       String?         @map("metric_id") @db.Uuid
+  startValue     Decimal?        @map("start_value") @db.Decimal(12, 2)
+  targetValue    Decimal?        @map("target_value") @db.Decimal(12, 2)
+  unit           String          @default("")
+  /// Milestone: what "done" means, and who approves it (the direct manager).
+  doneDefinition String?         @map("done_definition")
+  approverId     String?         @map("approver_id") @db.Uuid
+  doneAt         DateTime?       @map("done_at") @db.Timestamptz
+  doneApprovedBy String?         @map("done_approved_by") @db.Uuid
+  position       Int             @default(0)
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  objective Objective   @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  metric    Metric?     @relation(fields: [metricId], references: [id], onDelete: SetNull)
+  approver  Profile?    @relation("KrApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  links     KrLink[]
+  checkins  KrCheckin[]
+
+  @@map("key_results")
+}
+
+model KrLink {
+  keyResultId String @map("key_result_id") @db.Uuid
+  taskId      String @map("task_id") @db.Uuid
+
+  keyResult KeyResult @relation(fields: [keyResultId], references: [id], onDelete: Cascade)
+  task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@id([keyResultId, taskId])
+  @@map("kr_links")
+}
+
+model KrCheckin {
+  id          String   @id @default(uuid()) @db.Uuid
+  keyResultId String   @map("key_result_id") @db.Uuid
+  /// First day of the checked-in month.
+  month       DateTime @db.Date
+  value       Decimal? @db.Decimal(12, 2)
+  note        String?
+  evidenceUrl String?  @map("evidence_url")
+  createdBy   String?  @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  keyResult KeyResult @relation(fields: [keyResultId], references: [id], onDelete: Cascade)
+
+  @@unique([keyResultId, month])
+  @@map("kr_checkins")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — M9 Sales (PRD/PRD_Fase-2.md "Sales")
+// ---------------------------------------------------------------------------
+
+/// Every number in the pipeline reads a stage's category, never its name.
+enum StageCategory {
+  open
+  won
+  lost
+
+  @@map("stage_category")
+}
+
+enum InvoiceKind {
+  dp
+  term
+  final
+
+  @@map("invoice_kind")
+}
+
+enum PaymentPlatform {
+  xendit
+  bank_transfer
+  wise
+  paypal
+  other
+
+  @@map("payment_platform")
+}
+
+enum PaymentProofStatus {
+  submitted
+  verified
+  rejected
+
+  @@map("payment_proof_status")
+}
+
+model PipelineStage {
+  id          String        @id @default(uuid()) @db.Uuid
+  name        String
+  category    StageCategory
+  /// Default probability (%) a deal takes when it enters the stage.
+  probability Int           @default(0)
+  position    Int           @default(0)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  deals Deal[]
+
+  @@map("pipeline_stages")
+}
+
+model Deal {
+  id             String    @id @default(uuid()) @db.Uuid
+  title          String
+  clientId       String?   @map("client_id") @db.Uuid
+  /// A prospect that isn't a client yet.
+  prospectName   String?   @map("prospect_name")
+  value          Decimal   @db.Decimal(14, 2)
+  currency       String    @default("IDR")
+  probability    Int       @default(0)
+  expectedClose  DateTime? @map("expected_close") @db.Date
+  ownerId        String?   @map("owner_id") @db.Uuid
+  leadSource     String?   @map("lead_source")
+  serviceType    String?   @map("service_type")
+  lostReason     String?   @map("lost_reason")
+  notes          String?
+  stageId        String    @map("stage_id") @db.Uuid
+  stageChangedAt DateTime  @default(now()) @map("stage_changed_at") @db.Timestamptz
+  closedAt       DateTime? @map("closed_at") @db.Timestamptz
+  projectId      String?   @unique @map("project_id") @db.Uuid
+  /// Attio record id, for re-imports.
+  externalId     String?   @unique @map("external_id")
+  createdBy      String?   @map("created_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  client  Client?            @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  owner   Profile?           @relation("DealOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  stage   PipelineStage      @relation(fields: [stageId], references: [id])
+  project Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  history DealStageHistory[]
+
+  @@index([stageId])
+  @@index([ownerId])
+  @@map("deals")
+}
+
+model DealStageHistory {
+  id          String   @id @default(uuid()) @db.Uuid
+  dealId      String   @map("deal_id") @db.Uuid
+  fromStageId String?  @map("from_stage_id") @db.Uuid
+  toStageId   String   @map("to_stage_id") @db.Uuid
+  /// The deal's value (and currency) at the move — for the pipeline bridge.
+  value       Decimal  @db.Decimal(14, 2)
+  currency    String
+  changedBy   String?  @map("changed_by") @db.Uuid
+  changedAt   DateTime @default(now()) @map("changed_at") @db.Timestamptz
+
+  deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([dealId, changedAt])
+  @@index([changedAt])
+  @@map("deal_stage_history")
+}
+
+/// One row per day from the day the module went live — candle charts can't be rebuilt backwards.
+model PipelineSnapshot {
+  date        DateTime @id @db.Date
+  openIdr     Decimal  @map("open_idr") @db.Decimal(18, 2)
+  weightedIdr Decimal  @map("weighted_idr") @db.Decimal(18, 2)
+  openCount   Int      @map("open_count")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("pipeline_snapshots")
+}
+
+/// Proof of a payment made outside Xendit, uploaded by Sales and verified by Finance.
+model PaymentProof {
+  id               String             @id @default(uuid()) @db.Uuid
+  invoiceId        String             @map("invoice_id") @db.Uuid
+  paymentRequestId String?            @map("payment_request_id") @db.Uuid
+  amount           Decimal            @db.Decimal(14, 2)
+  currency         String
+  paidOn           DateTime           @map("paid_on") @db.Date
+  platform         PaymentPlatform
+  filePath         String?            @map("file_path")
+  fileName         String?            @map("file_name")
+  note             String?
+  /// IDR per unit of the currency on the day it was paid.
+  fxRateToIdr      Decimal?           @map("fx_rate_to_idr") @db.Decimal(18, 6)
+  status           PaymentProofStatus @default(submitted)
+  submittedBy      String?            @map("submitted_by") @db.Uuid
+  submittedAt      DateTime           @default(now()) @map("submitted_at") @db.Timestamptz
+  reviewedBy       String?            @map("reviewed_by") @db.Uuid
+  reviewedAt       DateTime?          @map("reviewed_at") @db.Timestamptz
+  reviewNote       String?            @map("review_note")
+  paymentId        String?            @unique @map("payment_id") @db.Uuid
+
+  invoice   Invoice                @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  request   InvoicePaymentRequest? @relation(fields: [paymentRequestId], references: [id], onDelete: SetNull)
+  submitter Profile?               @relation("ProofSubmitter", fields: [submittedBy], references: [id], onDelete: SetNull)
+  reviewer  Profile?               @relation("ProofReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  payment   Payment?               @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([invoiceId])
+  @@map("payment_proofs")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — M10 Finance
+// ---------------------------------------------------------------------------
+
+enum ObligationKind {
+  payroll
+  bpjs
+  tax
+  other
+
+  @@map("obligation_kind")
+}
+
+enum ObligationRecurrence {
+  monthly
+  yearly
+  once
+
+  @@map("obligation_recurrence")
+}
+
+/// A recurring duty Finance must not miss (payroll, BPJS, tax deadlines).
+/// Payroll and BPJS also show on the HR calendar.
+model Obligation {
+  id             String               @id @default(uuid()) @db.Uuid
+  title          String
+  kind           ObligationKind
+  recurrence     ObligationRecurrence @default(monthly)
+  /// Day of the month (1–31; a short month uses its last day).
+  dayOfMonth     Int                  @map("day_of_month")
+  /// 1–12 for yearly ones.
+  month          Int?
+  /// The date of a one-off.
+  onDate         DateTime?            @map("on_date") @db.Date
+  /// Rough amount, for planning.
+  amountEstimate Decimal?             @map("amount_estimate") @db.Decimal(14, 2)
+  currency       String               @default("IDR")
+  notes          String?
+  isActive       Boolean              @default(true) @map("is_active")
+  createdBy      String?              @map("created_by") @db.Uuid
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  completions ObligationCompletion[]
+
+  @@map("obligations")
+}
+
+/// One occurrence marked done (paid / filed).
+model ObligationCompletion {
+  id           String   @id @default(uuid()) @db.Uuid
+  obligationId String   @map("obligation_id") @db.Uuid
+  dueDate      DateTime @map("due_date") @db.Date
+  doneBy       String?  @map("done_by") @db.Uuid
+  doneAt       DateTime @default(now()) @map("done_at") @db.Timestamptz
+  note         String?
+
+  obligation Obligation @relation(fields: [obligationId], references: [id], onDelete: Cascade)
+  user       Profile?   @relation(fields: [doneBy], references: [id], onDelete: SetNull)
+
+  @@unique([obligationId, dueDate])
+  @@map("obligation_completions")
+}
+
+// ---------------------------------------------------------------------------
+// Sales CRM — companies and people with custom columns (Attio-style)
+// ---------------------------------------------------------------------------
+
+enum CrmObject {
+  company
+  person
+
+  @@map("crm_object")
+}
+
+enum CrmAttributeType {
+  text
+  number
+  currency
+  date
+  checkbox
+  select
+  multi_select
+  url
+  email
+  phone
+
+  @@map("crm_attribute_type")
+}
+
+/// A column Sales added to Companies or People. Values live in the
+/// record's `values` JSON, keyed by the attribute id.
+model CrmAttribute {
+  id         String           @id @default(uuid()) @db.Uuid
+  object     CrmObject
+  name       String
+  type       CrmAttributeType
+  /// Select / multi-select: [{ id, label, color }].
+  options    Json             @default("[]")
+  position   Int              @default(0)
+  createdBy  String?          @map("created_by") @db.Uuid
+  createdAt  DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  archivedAt DateTime?        @map("archived_at") @db.Timestamptz
+
+  @@index([object, position])
+  @@map("crm_attributes")
+}
+
+/// An organisation Sales talks to — a prospect or a client (`clientId`).
+model CrmCompany {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String
+  domain      String?
+  description String?
+  ownerId     String?   @map("owner_id") @db.Uuid
+  clientId    String?   @unique @map("client_id") @db.Uuid
+  values      Json      @default("{}")
+  createdBy   String?   @map("created_by") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  archivedAt  DateTime? @map("archived_at") @db.Timestamptz
+
+  client  Client?     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  owner   Profile?    @relation("CrmCompanyOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  creator Profile?    @relation("CrmCompanyCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  people  CrmPerson[]
+
+  @@map("crm_companies")
+}
+
+/// A contact — on its own or at a company.
+model CrmPerson {
+  id         String    @id @default(uuid()) @db.Uuid
+  name       String
+  email      String?
+  phone      String?
+  jobTitle   String?   @map("job_title")
+  companyId  String?   @map("company_id") @db.Uuid
+  ownerId    String?   @map("owner_id") @db.Uuid
+  values     Json      @default("{}")
+  createdBy  String?   @map("created_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz
+
+  company CrmCompany? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  owner   Profile?    @relation("CrmPersonOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  creator Profile?    @relation("CrmPersonCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@map("crm_people")
 }

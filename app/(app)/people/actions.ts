@@ -38,27 +38,64 @@ export async function resendInvite(id: unknown): Promise<ActionResult<{ link: st
   });
 }
 
-/** Role, employment type, admin flag — written under RLS (profiles_guard enforces who). */
+/**
+ * Role, employment type, admin flag; Phase 2 job role, division, level, title
+ * and manager (People module); access and modules (admin). Written under RLS
+ * — profiles_guard and module_grants_guard enforce who may change what, so
+ * only the fields that changed are sent.
+ */
 export async function updatePerson(id: unknown, raw: unknown): Promise<ActionResult> {
   return run(async () => {
     const user = await requireUser();
     const userId = parseOrFail(uuid, id);
     const data = parseOrFail(personAdminSchema, raw);
-    const before = await asUser(user, (tx) => tx.profile.findUnique({ where: { id: userId } }));
-    if (!before) fail("This person no longer exists.");
-    const updated = await asUser(user, (tx) =>
-      tx.profile.updateMany({
-        where: { id: userId },
-        data: { fullName: data.fullName, role: data.role, employmentType: data.employmentType, isAdmin: data.isAdmin },
-      }),
+    if (data.managerId === userId) fail("Someone can't be their own manager.");
+    const before = await asUser(user, (tx) =>
+      tx.profile.findUnique({ where: { id: userId }, include: { modules: { select: { module: true } } } }),
     );
-    if (updated.count === 0) fail(FORBIDDEN);
+    if (!before) fail("This person no longer exists.");
+
+    const next = {
+      fullName: data.fullName,
+      role: data.role,
+      employmentType: data.employmentType,
+      isAdmin: data.isAdmin,
+      jobRoleId: data.jobRoleId,
+      division: data.division,
+      level: data.level,
+      jobTitle: data.jobTitle,
+      managerId: data.managerId,
+      accessLevel: data.accessLevel,
+    };
+    const changed = Object.fromEntries(
+      Object.entries(next).filter(([k, v]) => before[k as keyof typeof next] !== v),
+    ) as Partial<typeof next>;
+    const had = new Set(before.modules.map((m) => m.module));
+    const want = new Set(data.modules);
+    const grant = data.modules.filter((m) => !had.has(m));
+    const revoke = [...had].filter((m) => !want.has(m));
+    if ((grant.length || revoke.length) && !perms.manageAccess(user)) fail("Only an admin can change modules.");
+
+    await asUser(user, async (tx) => {
+      if (Object.keys(changed).length) {
+        const updated = await tx.profile.updateMany({ where: { id: userId }, data: changed });
+        if (updated.count === 0) fail(FORBIDDEN);
+      }
+      if (grant.length) await tx.moduleGrant.createMany({ data: grant.map((module) => ({ userId, module })) });
+      if (revoke.length) await tx.moduleGrant.deleteMany({ where: { userId, module: { in: revoke } } });
+    });
     await logActivity({
       actorId: user.id,
       entityType: "profile",
       entityId: userId,
       action: "updated",
-      metadata: { from: { role: before.role, isAdmin: before.isAdmin }, to: { role: data.role, isAdmin: data.isAdmin } },
+      metadata: {
+        changed: Object.keys(changed),
+        from: Object.fromEntries(Object.keys(changed).map((k) => [k, before[k as keyof typeof next] ?? null])),
+        to: changed,
+        ...(grant.length ? { modulesGranted: grant } : {}),
+        ...(revoke.length ? { modulesRevoked: revoke } : {}),
+      },
     });
     revalidatePath("/people");
   });

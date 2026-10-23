@@ -4,8 +4,9 @@ import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import type { SectionRow, TaskPerson, TaskRow } from "@/lib/tasks/queries";
+import { AmountInput } from "@/components/amount-input";
 import { TASK_PRIORITIES, TASK_STATUSES } from "@/lib/validation";
-import { sentenceEnum } from "@/lib/format";
+import { formatDateShort, sentenceEnum } from "@/lib/format";
 import { archiveSection, createSection, createTask, moveSection, renameSection } from "@/app/(app)/tasks/actions";
 import { ViewToggle, LIST_KANBAN_OPTIONS, type ViewMode } from "@/components/view-toggle";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,9 @@ import { TaskKanban, STATUS_LABEL } from "./task-kanban";
 
 const ALL = "";
 
+type TaskTypeOption = { id: string; name: string; key: string };
+type LeaveRange = { userId: string; start: string; end: string };
+
 /**
  * A project's tasks (M2.1–M2.3): list grouped by section or kanban by status,
  * filtered by owner, priority, section or "my tasks". Filters and view live
@@ -33,6 +37,9 @@ export function ProjectTaskBoard({
   projectId,
   sections,
   tasks,
+  types,
+  reviewers,
+  leave = [],
   members,
   viewerId,
   canManage,
@@ -41,6 +48,9 @@ export function ProjectTaskBoard({
   projectId: string;
   sections: SectionRow[];
   tasks: TaskRow[];
+  types: TaskTypeOption[];
+  reviewers: TaskPerson[];
+  leave?: LeaveRange[];
   members: TaskPerson[];
   viewerId: string;
   canManage: boolean;
@@ -49,7 +59,7 @@ export function ProjectTaskBoard({
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const view = (params.get("view") === "kanban" ? "kanban" : "list") as ViewMode;
+  const view = (params.get("view") === "list" ? "list" : "kanban") as ViewMode;
   const owner = params.get("owner") ?? ALL;
   const priority = params.get("priority") ?? ALL;
   const section = params.get("section") ?? ALL;
@@ -122,7 +132,7 @@ export function ProjectTaskBoard({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <ViewToggle value={view} onChange={(v) => setParam({ view: v === "list" ? null : v })} options={LIST_KANBAN_OPTIONS} />
+        <ViewToggle value={view} onChange={(v) => setParam({ view: v === "kanban" ? null : v })} options={LIST_KANBAN_OPTIONS} />
         <SelectField
           aria-label="Owner"
           size="compact"
@@ -199,6 +209,9 @@ export function ProjectTaskBoard({
           projectId={projectId}
           sections={sections}
           members={members}
+          types={types}
+          reviewers={reviewers}
+          leave={leave}
           viewerId={viewerId}
           initial={newTask}
           onClose={() => setNewTask(null)}
@@ -277,6 +290,9 @@ function NewTaskDialog({
   projectId,
   sections,
   members,
+  types,
+  reviewers,
+  leave,
   viewerId,
   initial,
   onClose,
@@ -285,6 +301,9 @@ function NewTaskDialog({
   projectId: string;
   sections: SectionRow[];
   members: TaskPerson[];
+  types: TaskTypeOption[];
+  reviewers: TaskPerson[];
+  leave: LeaveRange[];
   viewerId: string;
   initial: { sectionId?: string; status?: TaskRow["status"] };
   onClose: () => void;
@@ -297,7 +316,14 @@ function NewTaskDialog({
   const [priority, setPriority] = useState<string>("normal");
   const [status, setStatus] = useState<string>(initial.status ?? "todo");
   const [dueDate, setDueDate] = useState("");
+  const [typeId, setTypeId] = useState(types.find((t) => t.key === "regular")?.id ?? types[0]?.id ?? "");
+  const [reviewerId, setReviewerId] = useState("");
+  const [estimateHours, setEstimateHours] = useState<number | null>(null);
+  const [deliverableUrl, setDeliverableUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  // PRD Phase 2: every task has a due date, a reviewer and an estimate of at least an hour.
+  const complete = Boolean(title.trim() && dueDate && reviewerId && estimateHours !== null && estimateHours >= 1);
+  const onLeave = ownerId && dueDate ? leave.find((l) => l.userId === ownerId && l.start <= dueDate && l.end >= dueDate) : undefined;
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -307,7 +333,7 @@ function NewTaskDialog({
           onSubmit={async (e) => {
             e.preventDefault();
             setBusy(true);
-            const res = await createTask(projectId, { title, sectionId, ownerId, collaboratorIds, priority, status, dueDate });
+            const res = await createTask(projectId, { title, sectionId, ownerId, collaboratorIds, priority, status, dueDate, typeId, reviewerId, estimateHours, deliverableUrl });
             setBusy(false);
             if (!res.ok) return void toast.error(res.error);
             onCreated(res.data.id);
@@ -330,12 +356,35 @@ function NewTaskDialog({
               <SelectField id="nt-priority" value={priority} onChange={setPriority} options={TASK_PRIORITIES.map((p) => ({ value: p, label: sentenceEnum(p) }))} />
             </FormField>
             <FormField label="Status" htmlFor="nt-status">
-              <SelectField id="nt-status" value={status} onChange={setStatus} options={TASK_STATUSES.map((s) => ({ value: s, label: STATUS_LABEL[s] }))} />
+              <SelectField
+                id="nt-status"
+                value={status}
+                onChange={setStatus}
+                // Approval belongs to the reviewer.
+                options={TASK_STATUSES.filter((s) => s !== "done").map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
+              />
             </FormField>
-            <FormField label="Due date" htmlFor="nt-due">
-              <DatePicker id="nt-due" value={dueDate} onChange={setDueDate} clearable placeholder="No due date" className="w-full" />
+            <FormField label="Type" htmlFor="nt-type" required>
+              <SelectField id="nt-type" value={typeId} onChange={setTypeId} options={types.map((t) => ({ value: t.id, label: t.name }))} />
+            </FormField>
+            <FormField label="Reviewer" htmlFor="nt-reviewer" required>
+              <SelectField id="nt-reviewer" value={reviewerId} onChange={setReviewerId} placeholder="Who approves it" options={reviewers.map((m) => ({ value: m.id, label: m.name }))} />
+            </FormField>
+            <FormField label="Due date" htmlFor="nt-due" required>
+              <DatePicker id="nt-due" value={dueDate} onChange={setDueDate} placeholder="Pick a date" className="w-full" />
+            </FormField>
+            <FormField label="Estimate (hours)" htmlFor="nt-estimate" required hint="At least 1 hour — fold smaller work into a checklist.">
+              <AmountInput id="nt-estimate" value={estimateHours} onChange={setEstimateHours} placeholder="e.g. 4" />
             </FormField>
           </div>
+          {onLeave && (
+            <p className="text-warning text-caption" role="status">
+              {members.find((m) => m.id === ownerId)?.name ?? "The owner"} is on leave {onLeave.start === onLeave.end ? `on ${formatDateShort(onLeave.start)}` : `${formatDateShort(onLeave.start)} – ${formatDateShort(onLeave.end)}`}. Pick another owner or due date.
+            </p>
+          )}
+          <FormField label="Deliverable link" htmlFor="nt-link" hint="Required for a shot: its Figma link.">
+            <Input id="nt-link" value={deliverableUrl} onChange={(e) => setDeliverableUrl(e.target.value)} placeholder="https://" />
+          </FormField>
           <FormField label="Collaborators">
             <PeoplePicker people={members.filter((m) => m.id !== ownerId)} value={collaboratorIds} onChange={setCollaboratorIds} className={cn("border")} />
           </FormField>
@@ -343,7 +392,7 @@ function NewTaskDialog({
             <Button type="button" variant="tertiary" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" disabled={busy || !title.trim()}>
+            <Button type="submit" disabled={busy || !complete}>
               {busy ? "Creating…" : "Create task"}
             </Button>
           </DialogFooter>

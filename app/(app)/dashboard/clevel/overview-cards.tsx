@@ -65,6 +65,9 @@ export function FinanceOverviewCard({
           }
         />
       </div>
+      <p className="text-muted-foreground text-caption">
+        Cash basis — revenue is payments received; costs are people costs and expenses in the same months.
+      </p>
       <InOutChart data={data} height={300} className="mt-2" />
     </DashboardCard>
   );

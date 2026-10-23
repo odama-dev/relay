@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import type { PersonRow } from "@/lib/people/queries";
+import type { JobRoleOption, PersonRow } from "@/lib/people/queries";
 import { employmentLabel, roleLabel } from "@/lib/roles";
 import { DataTable, type Column } from "@/components/data-table";
 import { StatusBadge } from "@/components/status-badge";
@@ -20,11 +20,15 @@ export function PeopleTable({
   currentUserId,
   canManage,
   isAdmin,
+  canManagePeopleModule,
+  jobRoles,
 }: {
   rows: PersonRow[];
   currentUserId: string;
   canManage: boolean;
   isAdmin: boolean;
+  canManagePeopleModule: boolean;
+  jobRoles: JobRoleOption[];
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState<PersonRow | null>(null);
@@ -44,6 +48,12 @@ export function PeopleTable({
       ),
     },
     { id: "email", header: "Email", sortValue: (r) => r.email, cell: (r) => r.email },
+    {
+      id: "title",
+      header: "Job title",
+      sortValue: (r) => (r.jobTitle ?? r.jobRoleName ?? "").toLowerCase(),
+      cell: (r) => r.jobTitle ?? r.jobRoleName ?? <span className="text-muted-foreground">—</span>,
+    },
     { id: "role", header: "Role", sortValue: (r) => roleLabel(r.role), cell: (r) => roleLabel(r.role) },
     {
       id: "employment",
@@ -119,6 +129,9 @@ export function PeopleTable({
         <PersonDialog
           person={editing}
           canGrantAdmin={isAdmin}
+          canManagePeopleModule={canManagePeopleModule}
+          jobRoles={jobRoles}
+          people={rows.filter((r) => r.status === "active").map((r) => ({ id: r.id, name: r.fullName }))}
           open
           onOpenChange={(o) => !o && setEditing(null)}
         />

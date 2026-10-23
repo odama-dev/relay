@@ -19,6 +19,16 @@ Spec: `PRD/PRD-Fase-1-MVP.md`. Everything below runs on a fresh database from
 | **C-Level dashboard** (`PRD/Clevel dashboard.md`) | Period filter (this / last month, quarter, YTD, custom) with comparison; data-completeness warnings; revenue vs target (12 mo), receivables & aging, often-late clients, costs & studio margin (+ trend), client revenue/margin & concentration, 3-month forecast; portfolio, health (+ over-budget trend), delivery, margin per project, needs-attention with reasons; utilization studio / role / person, hours composition, capacity 4 & 8 weeks. Inputs on Business Data: people costs, capacity + overrides, utilization targets, revenue targets, FX rates, dashboard rules, change history; retainer fee on projects; project on expenses | `lib/clevel/*`, `app/(app)/dashboard/clevel`, `app/(app)/business`, `components/trend-chart.tsx`, migration `…_clevel` |
 | **Jobs** | `due-reminders` 09:00, `time-reminders` 17:00 workdays, `oos-digest` 17:30, `lock-timesheets` Mon 00:00, `retainer-rollover` 1st 00:05, `overdue-invoices` 00:10, `budget-alerts` hourly; idempotent, logged in `job_runs` (Settings → Scheduled jobs). Backup: `scripts/backup.sh` 02:00 | `lib/jobs.ts`, `app/api/cron/[job]`, `docs/VPS_DEPLOY.md` |
 
+## Phase 2 (`PRD/PRD_Fase-2.md`)
+
+| Milestone | Built | Where |
+| --- | --- | --- |
+| **M6 Foundation** | Access / modules / reporting line, Metric Dictionary, task types, reviewer + review rounds with SLA, due-date changes, effective due & on time, attendance | migrations `…_m6_*`, `lib/metrics/*`, `lib/tasks/pure.ts`, `/metrics`, `/people/setup` |
+| **M7 KPI & OKR** | Metric definitions + engine, work logs, rating forms, versioned templates, scoring & grades, snapshots + objections, OKR cycles / objectives / KRs / check-ins, KPI Master seed | migration `…_m7_kpi_okr`, `lib/kpi/*`, `/kpi`, `/okr`, `/work-log`, `/ratings`, `/performance` |
+| **M8 Dashboards** | Responsibility widgets ("For you"), PM Timeline, leave vs tasks + reassign, team workload, studio OKR | migration `…_m8_dashboard`, `lib/dashboard/phase2.ts`, `app/(app)/dashboard/phase2-cards.tsx` |
+| **M9 Sales** | Pipeline (stages with category, kanban / list, stale deals, cards), won → client + project, Attio CSV import, daily snapshots, report (candles + bridge), invoice type / platform / FX at issue, payment proofs (Sales submits, Finance verifies), Pipeline and Payments-to-verify widgets | migrations `…_m9_*`, `lib/sales/*`, `/sales`, `/sales/report`, `/payments` (To verify), `app/api/invoices/[id]/proofs` |
+| **M10 Finance** | Operational Finance dashboard (cash in, due this week, proofs to verify, expenses; queues), receivables by client (aging buckets), obligations calendar (payroll, BPJS, tax, invoice due dates) with done ticks, payroll / BPJS on the HR calendar, Overdue-by-client and Obligations widgets | migration `…_m10_finance`, `lib/finance/obligations.ts`, `lib/finance/ops.ts`, `components/finance/*`, `app/(app)/dashboard/finance.tsx` |
+
 ## Verified
 
 - **RLS suite** (`tests/rls/access.test.ts`, 36 cases): RLS on every table, nothing

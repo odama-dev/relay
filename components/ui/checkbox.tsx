@@ -10,7 +10,8 @@ import { useSize } from "@/lib/size-context";
 // A standalone checkbox for places a CheckboxGroup row doesn't fit (a table
 // row, a bulk-select bar, a form field with a hint). It draws exactly what a
 // Fluid CheckboxItem draws: a 1.5px hairline box that darkens on hover, which
-// gives way to a check that draws itself in (0.08s) and retracts (0.04s).
+// fills with primary under a check that draws itself in (0.08s) and retracts
+// (0.04s).
 
 type CheckedState = boolean | "indeterminate";
 
@@ -57,7 +58,7 @@ function Checkbox({ checked, onCheckedChange, className, ...props }: CheckboxPro
           "absolute inset-0 border-[1.5px] border-solid transition-all duration-80",
           compact ? "rounded-[4px]" : "rounded-[5px]",
           on || mixed
-            ? "border-transparent"
+            ? "border-transparent bg-primary"
             : "border-border group-hover/checkbox:border-neutral-400 dark:group-hover/checkbox:border-neutral-500",
         )}
       />
@@ -76,7 +77,7 @@ function Checkbox({ checked, onCheckedChange, className, ...props }: CheckboxPro
                 strokeWidth={2}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                className="text-foreground absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+                className="text-primary-foreground absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
                 initial={{ opacity: 1 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 1 }}

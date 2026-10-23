@@ -41,6 +41,9 @@ const MAP: Record<string, Tone> = {
   warning: "warning",
   over_budget: "critical",
   no_budget: "neutral",
+  // project schedule (lib/dashboard/pure.ts)
+  at_risk: "warning",
+  delayed: "critical",
   // out-of-scope + corrections
   pending: "warning",
   approved: "positive",
@@ -49,10 +52,16 @@ const MAP: Record<string, Tone> = {
   draft: "neutral",
   sent: "active",
   partially_paid: "warning",
+  payment_submitted: "warning",
   paid: "positive",
   overdue: "critical",
   void: "neutral",
   expired: "critical",
+  // pipeline stage categories + deals (Phase 2 · M9)
+  open: "active",
+  won: "positive",
+  lost: "neutral",
+  stale: "warning",
 };
 
 /** Labels that differ from the sentence-cased value. */
@@ -61,6 +70,9 @@ const LABELS: Record<string, string> = {
   over_budget: "Over budget",
   no_budget: "No budget",
   todo: "To do",
+  // Phase 2: a task is done when its reviewer approves it.
+  review: "In review",
+  done: "Approved",
 };
 
 /** The label a status value reads as, everywhere it is shown. */

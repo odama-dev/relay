@@ -4,19 +4,23 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { currencyDecimals, formatMoney } from "@/lib/format";
-import { invoiceTotal, itemAmount, requestsMatchTotal, splitByPercent, fromMinor, toMinor } from "@/lib/invoices/pure";
+import { INVOICE_KIND_LABELS, invoiceTotal, itemAmount, PLATFORM_LABELS, requestsMatchTotal, splitByPercent, fromMinor, toMinor } from "@/lib/invoices/pure";
+import { INVOICE_KINDS, PAYMENT_PLATFORMS } from "@/lib/validation";
 import { createInvoice, updateInvoice } from "@/app/(app)/invoices/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { FormField, FormSection } from "@/components/form-field";
 import { DatePicker } from "@/components/date-picker";
+import { SelectField } from "@/components/select-field";
 import { AmountInput } from "@/components/amount-input";
 import { Icon, icons } from "@/components/icon";
 import { cn } from "@/lib/utils";
 
 export type EditorItem = { description: string; quantity: number | null; unitPrice: number | null };
 export type EditorRequest = { label: string; amount: number | null; percent: number | null; dueDate: string };
+type Kind = (typeof INVOICE_KINDS)[number];
+type Platform = (typeof PAYMENT_PLATFORMS)[number];
 
 /**
  * M5.1 — items (description, quantity, unit price → amount) and payment
@@ -33,10 +37,12 @@ export function InvoiceEditor({
   currency: string;
   /** Present when editing a draft. */
   invoiceId?: string;
-  initial: { issueDate: string; notes: string; items: EditorItem[]; requests: EditorRequest[] };
+  initial: { issueDate: string; notes: string; kind: Kind | null; platform: Platform; items: EditorItem[]; requests: EditorRequest[] };
 }) {
   const router = useRouter();
   const [issueDate, setIssueDate] = useState(initial.issueDate);
+  const [kind, setKind] = useState<Kind | null>(initial.kind);
+  const [platform, setPlatform] = useState<Platform>(initial.platform);
   const [notes, setNotes] = useState(initial.notes);
   const [items, setItems] = useState<EditorItem[]>(initial.items);
   const [requests, setRequests] = useState<EditorRequest[]>(initial.requests);
@@ -65,6 +71,8 @@ export function InvoiceEditor({
       projectId,
       issueDate,
       notes,
+      kind,
+      platform,
       items: validItems.map((i) => ({ description: i.description, quantity: i.quantity!, unitPrice: i.unitPrice! })),
       requests: requests.map((r, i) => ({ label: r.label, amount: amounts[i]!, dueDate: r.dueDate })),
     };
@@ -85,6 +93,22 @@ export function InvoiceEditor({
         </FormField>
         <FormField label="Notes" htmlFor="inv-notes" hint="Printed on the invoice.">
           <Textarea id="inv-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </FormField>
+        <FormField label="Type" htmlFor="inv-kind">
+          <SelectField
+            id="inv-kind"
+            value={kind}
+            onChange={(v) => setKind((v || null) as Kind | null)}
+            noneLabel="Not set"
+            options={INVOICE_KINDS.map((k) => ({ value: k, label: INVOICE_KIND_LABELS[k] }))}
+          />
+        </FormField>
+        <FormField
+          label="Paid via"
+          htmlFor="inv-platform"
+          hint={platform === "xendit" ? "Each payment request gets a Xendit link; payments are recorded automatically." : "No payment links. Sales uploads the proof of payment and Finance verifies it."}
+        >
+          <SelectField id="inv-platform" value={platform} onChange={(v) => setPlatform(v as Platform)} options={PAYMENT_PLATFORMS.map((p) => ({ value: p, label: PLATFORM_LABELS[p] }))} />
         </FormField>
       </div>
 

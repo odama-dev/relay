@@ -16,6 +16,7 @@ import { EntityTabs, type EntityTab } from "@/components/entity-tabs";
 import { StatusBadge } from "@/components/status-badge";
 import { HealthIndicator } from "@/components/health-indicator";
 import { ProjectTaskBoard } from "@/components/tasks/project-task-board";
+import { upcomingLeave } from "@/lib/dashboard/phase2";
 import { TaskPanel } from "@/components/tasks/task-panel";
 import { HealthPanel } from "@/components/health/health-panel";
 import { InvoicesTable } from "@/components/invoice/invoices-table";
@@ -60,6 +61,8 @@ export default async function ProjectPage({
     ? await asUser(user, (tx) => tx.profile.findMany({ where: { id: { in: people.map((p) => p.id) } }, select: { id: true, avatarUrl: true } }))
     : [];
   const avatarOf = new Map(avatars.map((a) => [a.id, a.avatarUrl]));
+  // PRD "Cuti & kapasitas": warn when a new task falls due on its owner's leave.
+  const leave = board && v.canManage ? await upcomingLeave(user, project.members.map((m) => m.id)) : [];
 
   const tabs: EntityTab[] = [];
   if (board) {
@@ -72,6 +75,9 @@ export default async function ProjectPage({
           projectId={id}
           sections={board.sections}
           tasks={board.tasks}
+          types={board.types}
+          reviewers={board.reviewers}
+          leave={leave}
           members={project.members.filter((m) => m.active).map((m) => ({ id: m.id, name: m.name, avatarUrl: m.avatarUrl }))}
           viewerId={user.id}
           canManage={v.canManage}

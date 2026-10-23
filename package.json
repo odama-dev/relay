@@ -17,6 +17,8 @@
     "db:studio": "prisma studio",
     "db:seed": "tsx --env-file-if-exists=.env prisma/seed.ts",
     "db:seed:history": "tsx --env-file-if-exists=.env prisma/seed-history.ts",
+    "db:seed:kpi": "tsx --env-file-if-exists=.env prisma/seed-kpi.ts",
+    "db:seed:sales": "tsx --env-file-if-exists=.env prisma/seed-sales.ts",
     "db:reset": "prisma migrate reset --force",
     "db:up": "supabase start",
     "db:down": "supabase stop",

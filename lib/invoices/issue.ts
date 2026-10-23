@@ -10,6 +10,8 @@ import { formatInvoiceNumber, requestsMatchTotal } from "@/lib/invoices/pure";
 import { renderInvoicePdf } from "@/lib/invoices/pdf";
 import { refreshInvoice } from "@/lib/invoices/payments";
 import { ActionError } from "@/lib/actions";
+import { rateToIdrOn } from "@/lib/fx";
+import { isoDate } from "@/lib/time/pure";
 
 /**
  * The system half of "Send to client" (M5.2–M5.5). The caller has already
@@ -37,12 +39,17 @@ async function ensureNumber(invoiceId: string): Promise<string> {
 
 const LINK_DURATION_DAYS = 60;
 
-/** M5.4 — one Xendit link per payment request that doesn't have a live one. */
+/**
+ * M5.4 — one Xendit link per payment request that doesn't have a live one.
+ * Invoices paid another way (bank transfer, Wise, PayPal — Phase 2 · M9)
+ * get none; Sales uploads the proof instead.
+ */
 export async function ensurePaymentLinks(invoiceId: string, opts: { renew?: string } = {}): Promise<void> {
   const inv = await prisma.invoice.findUniqueOrThrow({
     where: { id: invoiceId },
     include: { paymentRequests: true, project: { select: { code: true } } },
   });
+  if (inv.platform !== "xendit") return;
   for (const r of inv.paymentRequests) {
     const renew = opts.renew === r.id;
     if (r.status === "paid" || r.status === "void") continue;
@@ -150,7 +157,9 @@ export async function sendInvoice(invoiceId: string, input: SendInput): Promise<
   if (!res.ok) throw new ActionError(`The email wasn't sent: ${res.error}. Nothing changed — try again.`);
 
   if (inv.status === "draft") {
-    await prisma.invoice.update({ where: { id: invoiceId }, data: { status: "sent", sentAt: new Date() } });
+    // Phase 2 · M9: the rate to IDR on the issue date is kept with the invoice.
+    const fxRateAtIssue = await rateToIdrOn(inv.currency, isoDate(inv.issueDate));
+    await prisma.invoice.update({ where: { id: invoiceId }, data: { status: "sent", sentAt: new Date(), fxRateAtIssue } });
     await refreshInvoice(invoiceId);
   }
   return { number };

@@ -514,6 +514,26 @@
   padding-right: max(var(--page-gutter, 0px), 0.75rem);
 }
 
+/* A table opened under a row (DataTable's renderExpanded) is a sub-table:
+   it stays inside its cell on a light tint, its first column starts under
+   the parent's text (past the chevron), its header is a quiet caption, and
+   its last row drops its rule so the parent row's rule is the only one. */
+[data-slot="data-table"] [data-slot="data-table"] {
+  margin-inline: 0;
+  background: color-mix(in srgb, var(--hover) 50%, transparent);
+}
+[data-slot="data-table"] [data-slot="data-table"] th {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption, 0.75rem);
+  font-variation-settings: "wght" 400, "opsz" 14;
+}
+[data-slot="data-table"] [data-slot="data-table"] :is(th, td):first-child {
+  padding-left: calc(max(var(--page-gutter, 0px), 0.75rem) + 1.5rem);
+}
+[data-slot="data-table"] [data-slot="data-table"] tbody tr:last-child {
+  border-bottom-width: 0;
+}
+
 /* One icon weight everywhere. Icons are 24-grid outline SVGs sized by props
    or by CSS (e.g. a button's [&_svg]:size-4), and Fluid components bump
    their stroke on hover/active — so a stroke-width set in grid units would

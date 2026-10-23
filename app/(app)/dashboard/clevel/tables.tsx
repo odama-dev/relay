@@ -53,7 +53,22 @@ type MarginRow = {
   oosValue: number | null;
   projectedMargin: number | null;
   costKnown: boolean;
+  burn: Burn | null;
 };
+
+type Burn = { burnPct: number | null; progressPct: number | null; ahead: boolean | null };
+
+/** A running fixed-price project: hours burnt vs tasks done, not a margin (Metric Dictionary). */
+function BurnCell({ burn }: { burn: Burn }) {
+  return (
+    <span
+      className={cn("tabular", burn.ahead && "text-warning")}
+      title={burn.ahead ? "Budget is burning faster than the work gets done" : "Running fixed-price project — budget burn vs progress, not margin"}
+    >
+      {burn.burnPct === null ? "No budget" : `${burn.burnPct}% burnt`} · {burn.progressPct === null ? "no tasks" : `${burn.progressPct}% done`}
+    </span>
+  );
+}
 
 /** §5.4 — margin per client project; sortable on every number. */
 export function ProjectMarginTable({ rows }: { rows: MarginRow[] }) {
@@ -68,15 +83,24 @@ export function ProjectMarginTable({ rows }: { rows: MarginRow[] }) {
       id: "margin",
       header: "Margin",
       align: "right",
-      cell: (r) => (
-        <span className={cn("tabular", neg(r.period.margin))} title={r.costKnown ? undefined : "Some hours have no cost yet"}>
-          {idr(r.period.margin)}
-          {!r.costKnown && <span className="text-warning">*</span>}
-        </span>
-      ),
+      cell: (r) =>
+        r.burn ? (
+          <BurnCell burn={r.burn} />
+        ) : (
+          <span className={cn("tabular", neg(r.period.margin))} title={r.costKnown ? undefined : "Some hours have no cost yet"}>
+            {idr(r.period.margin)}
+            {!r.costKnown && <span className="text-warning">*</span>}
+          </span>
+        ),
       sortValue: (r) => r.period.margin,
     },
-    { id: "pct", header: "Margin %", align: "right", cell: (r) => <span className={cn("tabular", neg(r.period.marginPct))}>{formatPercent(r.period.marginPct)}</span>, sortValue: (r) => r.period.marginPct },
+    {
+      id: "pct",
+      header: "Margin %",
+      align: "right",
+      cell: (r) => (r.burn ? "—" : <span className={cn("tabular", neg(r.period.marginPct))}>{formatPercent(r.period.marginPct)}</span>),
+      sortValue: (r) => r.period.marginPct,
+    },
     { id: "rate", header: "Rate / hour", align: "right", cell: (r) => <span className="tabular">{idr(r.effectiveRate)}</span>, sortValue: (r) => r.effectiveRate },
     {
       id: "oos",
@@ -150,6 +174,7 @@ type MarginEdgeRow = {
   contractType: ContractType | null;
   period: { margin: number };
   costKnown: boolean;
+  burn: Burn | null;
   endDate: string | null;
   members: { id: string; name: string; avatarUrl: string | null }[];
 };
@@ -163,12 +188,15 @@ export function MarginEdgesTable({ rows }: { rows: MarginEdgeRow[] }) {
     {
       id: "margin",
       header: "Margin",
-      cell: (r) => (
-        <span className={cn("tabular", neg(r.period.margin))} title={r.costKnown ? undefined : "Some hours have no cost yet"}>
-          {idr(r.period.margin)}
-          {!r.costKnown && <span className="text-warning">*</span>}
-        </span>
-      ),
+      cell: (r) =>
+        r.burn ? (
+          <BurnCell burn={r.burn} />
+        ) : (
+          <span className={cn("tabular", neg(r.period.margin))} title={r.costKnown ? undefined : "Some hours have no cost yet"}>
+            {idr(r.period.margin)}
+            {!r.costKnown && <span className="text-warning">*</span>}
+          </span>
+        ),
       sortValue: (r) => r.period.margin,
     },
     { id: "due", header: "Due date", cell: (r) => <span className="tabular">{r.endDate ? formatDate(r.endDate) : "—"}</span>, sortValue: (r) => r.endDate ?? "" },
@@ -179,7 +207,7 @@ export function MarginEdgesTable({ rows }: { rows: MarginEdgeRow[] }) {
         r.members.length ? (
           <span className="flex items-center -space-x-1.5" title={r.members.map((m) => m.name).join(", ")}>
             {r.members.slice(0, 4).map((m) => (
-              <MemberAvatar key={m.id} seed={m.id} src={m.avatarUrl} size={20} className="ring-background ring-2" />
+              <MemberAvatar key={m.id} seed={m.id} src={m.avatarUrl} name={m.name} size={20} className="ring-background ring-2" />
             ))}
             {r.members.length > 4 && <span className="tabular pl-2.5">+{r.members.length - 4}</span>}
           </span>

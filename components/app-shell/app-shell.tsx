@@ -6,7 +6,7 @@ import { SIDEBAR_COOKIE_NAME } from "@/components/ui/sidebar-core";
 import { AppFrame } from "./sidebar";
 
 /** What the client-side shell needs about the signed-in user. */
-export type ShellUser = Pick<CurrentUser, "id" | "email" | "fullName" | "role" | "isAdmin" | "avatarUrl">;
+export type ShellUser = Pick<CurrentUser, "id" | "email" | "fullName" | "role" | "isAdmin" | "accessLevel" | "modules" | "avatarUrl">;
 
 export async function AppShell({ user, children }: { user: CurrentUser; children: ReactNode }) {
   const [inbox, cookieStore] = await Promise.all([getInbox(user), cookies()]);
@@ -19,6 +19,8 @@ export async function AppShell({ user, children }: { user: CurrentUser; children
     fullName: user.fullName,
     role: user.role,
     isAdmin: user.isAdmin,
+    accessLevel: user.accessLevel,
+    modules: user.modules,
     avatarUrl: user.avatarUrl,
   };
 

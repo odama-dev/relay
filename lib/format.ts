@@ -21,7 +21,8 @@ function moneyFormatter(currency: string, compact: boolean): Intl.NumberFormat {
     f = new Intl.NumberFormat("en-US", {
       style: "currency",
       currency,
-      currencyDisplay: currency === "IDR" ? "code" : "narrowSymbol",
+      // "symbol", not "narrowSymbol": USD, SGD and AUD must not all render as "$".
+      currencyDisplay: "symbol",
       ...(compact
         ? { notation: "compact", maximumFractionDigits: 1 }
         : { minimumFractionDigits: digits, maximumFractionDigits: digits }),
@@ -31,11 +32,11 @@ function moneyFormatter(currency: string, compact: boolean): Intl.NumberFormat {
   return f;
 }
 
-/** "IDR 15,900,000" / "$1,250.50" / "€980.00". */
+/** "IDR 15,900,000" / "$1,250.50" / "SGD 1,250.50" / "A$1,250.50" / "€980.00". */
 export function formatMoney(value: number, currency: string, opts?: { compact?: boolean }): string {
   if (!Number.isFinite(value)) return "—";
-  // en-US prints the IDR code glued to the number ("IDR 15,900,000" needs the space).
-  return moneyFormatter(currency, Boolean(opts?.compact)).format(value).replace(/^IDR\s?/, "IDR ");
+  // Codes (IDR, SGD) come with a no-break space or none; normalise to one plain space.
+  return moneyFormatter(currency, Boolean(opts?.compact)).format(value).replace(/^(-?)([A-Z]{3})\s?/, "$1$2 ");
 }
 
 /** Minor-unit precision of a currency (IDR 0, USD 2). */
@@ -113,6 +114,12 @@ export function formatMonth(value: DateInput): string {
 }
 
 /** "13 Oct 2026, 21:40" — a moment, shown in the viewer's time zone. */
+/** Wall-clock "HH:MM" → "9:00 AM" (calendar events). */
+export function formatClock(hhmm: string): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  return `${((h! + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h! < 12 ? "AM" : "PM"}`;
+}
+
 export function formatDateTime(value: Date | string, timeZone = "Asia/Jakarta"): string {
   return new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",

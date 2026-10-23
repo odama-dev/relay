@@ -1,0 +1,1247 @@
+{
+  "source": "KPI Master · Odama OS (Google Sheet), imported 2026-10-22",
+  "metrics": [
+    {
+      "key": "task_on_time",
+      "name": "Task on Time",
+      "direction": "higher",
+      "unit": "%",
+      "definition": {
+        "source": "task",
+        "dateBy": "due",
+        "aggregation": "percent",
+        "part": {
+          "onTime": true
+        },
+        "weekly": true
+      },
+      "description": "Skor mingguan = task approved ≤ due efektif ÷ task yang due minggu itu. Skor periode = rata-rata skor mingguan.",
+      "manual": false
+    },
+    {
+      "key": "project_revision",
+      "name": "Project Revision",
+      "direction": "lower",
+      "unit": "rounds / deliverable",
+      "definition": {
+        "source": "task",
+        "filters": {
+          "types": [
+            "revision"
+          ]
+        },
+        "aggregation": "average",
+        "per": "group",
+        "distinctWeeks": true
+      },
+      "description": "Feedback di hitung mingguan, jika belum ada feedback dari client, brarti tidak ada putaran feedback, misal di minggu selanjutnya baru diberi feedback, itu baru di hitung 1 putaran feedback",
+      "manual": false
+    },
+    {
+      "key": "shot_revision",
+      "name": "Shot Revision",
+      "direction": "lower",
+      "unit": "revisions / shot",
+      "definition": {
+        "source": "shot",
+        "filters": {
+          "statuses": [
+            "approved"
+          ]
+        },
+        "aggregation": "average",
+        "per": "value"
+      },
+      "description": "Hanya revisi yang diminta AD/CD, dihitung per shot.",
+      "manual": false
+    },
+    {
+      "key": "error_count",
+      "name": "Error",
+      "direction": "lower",
+      "unit": "errors",
+      "definition": {
+        "source": "error",
+        "filters": {
+          "statuses": [
+            "approved"
+          ]
+        },
+        "aggregation": "count"
+      },
+      "description": "Kesalahan yang sudah sampai ke klien/publik dan harus diperbaiki. Wajib bukti (link/screenshot). Kesalahan yang tertangkap QC internal TIDAK dihitung (masuk internal_revision).",
+      "manual": false
+    },
+    {
+      "key": "internal_revision",
+      "name": "Internal Revision",
+      "direction": "record",
+      "unit": "revisions",
+      "definition": {
+        "source": "qc_record",
+        "filters": {
+          "tags": [
+            "internal_revision"
+          ]
+        },
+        "aggregation": "count"
+      },
+      "description": "Kesalahan yang tertangkap QC internal sebelum sampai ke klien.",
+      "manual": false
+    },
+    {
+      "key": "shot_produced",
+      "name": "Shot Produced",
+      "direction": "higher",
+      "unit": "shots",
+      "definition": {
+        "source": "shot",
+        "filters": {
+          "statuses": [
+            "approved"
+          ]
+        },
+        "aggregation": "count"
+      },
+      "description": "Dihitung saat shot telah di serahkan (ada link figma) setelah di-approve AD/CD.",
+      "manual": false
+    },
+    {
+      "key": "content_produced",
+      "name": "Content Produced",
+      "direction": "higher",
+      "unit": "per week",
+      "definition": {
+        "source": "task",
+        "dateBy": "approved",
+        "filters": {
+          "types": [
+            "content"
+          ],
+          "statuses": [
+            "approved"
+          ]
+        },
+        "aggregation": "average",
+        "per": "week"
+      },
+      "description": "Task bertipe Content yang sudah approved.",
+      "manual": false
+    },
+    {
+      "key": "idea",
+      "name": "Idea",
+      "direction": "higher",
+      "unit": "ideas",
+      "definition": {
+        "source": "idea",
+        "filters": {
+          "statuses": [
+            "approved"
+          ]
+        },
+        "aggregation": "count"
+      },
+      "description": "Ide ditulis di OS dengan format minimal (masalah, usulan, dampak) dan ditanggapi AD/CD. SLA tanggapan 3 hari kerja; lewat SLA → otomatis dihitung. Kategori: Skill Contribution / Creative Leadership / Development.",
+      "manual": false
+    },
+    {
+      "key": "tech_support",
+      "name": "Technical Support",
+      "direction": "higher",
+      "unit": "%",
+      "definition": {
+        "source": "support_request",
+        "filters": {
+          "statuses": [
+            "approved"
+          ]
+        },
+        "aggregation": "percent",
+        "part": {
+          "excludeTags": [
+            "escalated"
+          ]
+        }
+      },
+      "description": "Permintaan diselesaikan sendiri tanpa eskalasi ÷ total permintaan, per bulan.",
+      "manual": false
+    },
+    {
+      "key": "qc_product",
+      "name": "QC Product",
+      "direction": "higher",
+      "unit": "products",
+      "definition": {
+        "source": "qc_record",
+        "filters": {
+          "tags": [
+            "product"
+          ],
+          "statuses": [
+            "approved"
+          ]
+        },
+        "aggregation": "count"
+      },
+      "description": "1 product = 1 output utuh siap pakai/handover (fitur, landing page, aset final yang di-approve), bukan sub-task.",
+      "manual": false
+    },
+    {
+      "key": "product_delivered",
+      "name": "Product (Developer)",
+      "direction": "higher",
+      "unit": "products",
+      "definition": {
+        "source": "release",
+        "filters": {
+          "statuses": [
+            "approved"
+          ]
+        },
+        "aggregation": "count"
+      },
+      "description": "1 product full yang sudah di-deploy ke production dan di-approve PM/klien.",
+      "manual": false
+    },
+    {
+      "key": "bug_rate",
+      "name": "Bug Rate",
+      "direction": "lower",
+      "unit": "%",
+      "definition": {
+        "source": "release",
+        "aggregation": "ratio"
+      },
+      "description": "Bug yang ditemukan setelah release ÷ task yang dirilis, per release. Log a release with the bugs found after it as its value and the tasks released as its total.",
+      "manual": false
+    },
+    {
+      "key": "bug_fix_on_time",
+      "name": "Bug Fix On Time",
+      "direction": "higher",
+      "unit": "%",
+      "definition": {
+        "source": "task",
+        "filters": {
+          "types": [
+            "bug"
+          ]
+        },
+        "aggregation": "percent",
+        "part": {
+          "onTime": true
+        }
+      },
+      "description": "Task Bug approved ≤ due efektif ÷ total task Bug.",
+      "manual": false
+    },
+    {
+      "key": "project_contribution",
+      "name": "Contribute Project",
+      "direction": "higher",
+      "unit": "%",
+      "definition": {
+        "source": "attendance",
+        "aggregation": "percent",
+        "part": {
+          "statuses": [
+            "present",
+            "remote"
+          ],
+          "tags": [
+            "logged"
+          ]
+        }
+      },
+      "description": "Hari kerja hadir + ada log time di project ÷ hari kerja.",
+      "manual": false
+    },
+    {
+      "key": "active_project",
+      "name": "Active Project",
+      "direction": "record",
+      "unit": "projects",
+      "definition": {
+        "source": "project",
+        "filters": {
+          "projectRole": "member",
+          "statuses": [
+            "active",
+            "on_hold"
+          ]
+        },
+        "aggregation": "count"
+      },
+      "description": "Jumlah project aktif yang diikuti.",
+      "manual": false
+    },
+    {
+      "key": "project_delivery_rate",
+      "name": "Project Delivery Rate",
+      "direction": "higher",
+      "unit": "%",
+      "definition": {
+        "source": "project",
+        "filters": {
+          "projectRole": "pm",
+          "statuses": [
+            "completed"
+          ]
+        },
+        "aggregation": "percent",
+        "part": {
+          "tags": [
+            "on_time"
+          ]
+        }
+      },
+      "description": "Project fixed: selesai ≤ end date. Retainer: milestone bulanan tepat waktu.",
+      "manual": false
+    },
+    {
+      "key": "testimony",
+      "name": "Client Testimony",
+      "direction": "higher",
+      "unit": "%",
+      "definition": {
+        "source": "project",
+        "filters": {
+          "projectRole": "pm",
+          "statuses": [
+            "completed"
+          ],
+          "projectKinds": [
+            "client"
+          ]
+        },
+        "aggregation": "percent",
+        "part": {
+          "tags": [
+            "testimony"
+          ]
+        }
+      },
+      "description": "Project ditutup dengan ≥1 testimoni ≤14 hari setelah ditutup. Bukti sah: form testimoni ATAU screenshot/link chat apresiasi. Maks 1 dihitung per project. Apresiasi selama project tetap sah.",
+      "manual": false
+    },
+    {
+      "key": "timely_reporting",
+      "name": "Timely Reporting",
+      "direction": "higher",
+      "unit": "%",
+      "definition": {
+        "source": "task",
+        "filters": {
+          "types": [
+            "report"
+          ]
+        },
+        "aggregation": "percent",
+        "part": {
+          "onTime": true
+        }
+      },
+      "description": "Task bertipe Report approved ≤ due ÷ total report wajib.",
+      "manual": false
+    },
+    {
+      "key": "self_improvement",
+      "name": "Self Improvement",
+      "direction": "higher",
+      "unit": "challenges",
+      "definition": {
+        "source": "challenge",
+        "filters": {
+          "statuses": [
+            "approved"
+          ]
+        },
+        "aggregation": "count"
+      },
+      "description": "Challenge dicatat di OS dengan bukti hasil, divalidasi Lead PM.",
+      "manual": false
+    },
+    {
+      "key": "review_turnaround",
+      "name": "Review Turnaround",
+      "direction": "higher",
+      "unit": "%",
+      "definition": {
+        "source": "review",
+        "aggregation": "percent",
+        "part": {
+          "onTime": true
+        }
+      },
+      "description": "Review selesai ≤1 hari kerja ÷ total review.",
+      "manual": false
+    },
+    {
+      "key": "collaboration",
+      "name": "Collaboration",
+      "direction": "higher",
+      "unit": "%",
+      "definition": {
+        "source": "rating",
+        "aggregation": "rating"
+      },
+      "description": "Form mingguan, 4 kriteria (lihat tab Rubrik). Minggu tanpa kolaborasi tidak dihitung. Komentar wajib untuk nilai < 3.",
+      "manual": false
+    },
+    {
+      "key": "visual_consistency",
+      "name": "Visual Consistency",
+      "direction": "higher",
+      "unit": "%",
+      "definition": {
+        "source": "rating",
+        "aggregation": "rating"
+      },
+      "description": "Rubrik bulanan (lihat tab Rubrik).",
+      "manual": false
+    },
+    {
+      "key": "tech_reliability",
+      "name": "Technical Reliability & QC",
+      "direction": "higher",
+      "unit": "%",
+      "definition": {
+        "source": "rating",
+        "aggregation": "rating"
+      },
+      "description": "Rubrik bulanan (lihat tab Rubrik).",
+      "manual": false
+    },
+    {
+      "key": "team_task_on_time",
+      "name": "Team Task on Time",
+      "direction": "higher",
+      "unit": "%",
+      "definition": {
+        "source": "task",
+        "scope": "team",
+        "dateBy": "due",
+        "aggregation": "percent",
+        "part": {
+          "onTime": true
+        },
+        "weekly": true
+      },
+      "description": "Task on Time across everyone reporting to the person.",
+      "manual": false
+    },
+    {
+      "key": "team_project_revision",
+      "name": "Team Project Revision",
+      "direction": "lower",
+      "unit": "rounds / deliverable",
+      "definition": {
+        "source": "task",
+        "scope": "team",
+        "filters": {
+          "types": [
+            "revision"
+          ]
+        },
+        "aggregation": "average",
+        "per": "group",
+        "distinctWeeks": true
+      },
+      "description": "Project Revision across the person's team.",
+      "manual": false
+    },
+    {
+      "key": "team_error_count",
+      "name": "Team Errors",
+      "direction": "lower",
+      "unit": "errors",
+      "definition": {
+        "source": "error",
+        "scope": "team",
+        "filters": {
+          "statuses": [
+            "approved"
+          ]
+        },
+        "aggregation": "count"
+      },
+      "description": "Errors across the person's team.",
+      "manual": false
+    },
+    {
+      "key": "team_internal_revision",
+      "name": "Team Internal Revision",
+      "direction": "lower",
+      "unit": "revisions",
+      "definition": {
+        "source": "qc_record",
+        "scope": "team",
+        "filters": {
+          "tags": [
+            "internal_revision"
+          ]
+        },
+        "aggregation": "count"
+      },
+      "description": "Internal revisions across the person's team.",
+      "manual": false
+    },
+    {
+      "key": "internal_team_rubric",
+      "name": "Internal Team Rubric",
+      "direction": "higher",
+      "unit": "%",
+      "definition": {
+        "source": "rating",
+        "aggregation": "rating"
+      },
+      "description": "Self-assessment rubric (problem solving, team collaboration & upskilling), reviewed by HR.",
+      "manual": false
+    },
+    {
+      "key": "internal_team",
+      "name": "Internal Team Contribution & Upskilling",
+      "direction": "higher",
+      "unit": "%",
+      "definition": {
+        "source": "rating",
+        "aggregation": "composite",
+        "components": [
+          {
+            "metricKey": "team_task_on_time",
+            "weight": 15,
+            "target": 90,
+            "direction": "higher"
+          },
+          {
+            "metricKey": "team_project_revision",
+            "weight": 15,
+            "target": 2,
+            "direction": "lower"
+          },
+          {
+            "metricKey": "team_error_count",
+            "weight": 15,
+            "target": 2,
+            "direction": "lower"
+          },
+          {
+            "metricKey": "team_internal_revision",
+            "weight": 15,
+            "target": 4,
+            "direction": "lower"
+          },
+          {
+            "metricKey": "internal_team_rubric",
+            "weight": 40,
+            "target": 80,
+            "direction": "higher"
+          }
+        ]
+      },
+      "description": "15% task_on_time tim + 15% project_revision tim + 15% error_count tim + 15% internal_revision tim (dinormalisasi) + 40% rubrik (problem solving & kolaborasi).",
+      "manual": false
+    }
+  ],
+  "templates": [
+    {
+      "name": "Design Core",
+      "kind": "core",
+      "items": [
+        {
+          "metric": "task_on_time",
+          "target": 90,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "project_revision",
+          "target": 2,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "shot_revision",
+          "target": 3,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "error_count",
+          "target": 2,
+          "targetPer": "semester",
+          "scorePeriod": "semester",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "shot_produced",
+          "target": 12,
+          "targetPer": "semester",
+          "scorePeriod": "semester",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        }
+      ]
+    },
+    {
+      "name": "Add-on: Technical Support",
+      "kind": "addon",
+      "items": [
+        {
+          "metric": "tech_support",
+          "target": 80,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        }
+      ]
+    },
+    {
+      "name": "Add-on: Idea",
+      "kind": "addon",
+      "items": [
+        {
+          "metric": "idea",
+          "target": 2,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": "skill_contribution"
+        }
+      ]
+    },
+    {
+      "name": "Add-on: QC Product",
+      "kind": "addon",
+      "items": [
+        {
+          "metric": "qc_product",
+          "target": 8,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        }
+      ]
+    },
+    {
+      "name": "Add-on: Creative Leadership",
+      "kind": "addon",
+      "items": [
+        {
+          "metric": "idea",
+          "target": 2,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": "creative_leadership"
+        }
+      ]
+    },
+    {
+      "name": "Add-on: Development",
+      "kind": "addon",
+      "items": [
+        {
+          "metric": "idea",
+          "target": 4,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": "development"
+        }
+      ]
+    },
+    {
+      "name": "Add-on: Internal Team",
+      "kind": "addon",
+      "items": [
+        {
+          "metric": "internal_team",
+          "target": 90,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        }
+      ]
+    },
+    {
+      "name": "Design Junior (Content)",
+      "kind": "core",
+      "items": [
+        {
+          "metric": "content_produced",
+          "target": 2,
+          "targetPer": "week",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "shot_produced",
+          "target": 3,
+          "targetPer": "semester",
+          "scorePeriod": "semester",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "collaboration",
+          "target": 80,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "task_on_time",
+          "target": 90,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "shot_revision",
+          "target": null,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 0,
+          "recordOnly": true,
+          "tag": null
+        },
+        {
+          "metric": "project_revision",
+          "target": null,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 0,
+          "recordOnly": true,
+          "tag": null
+        },
+        {
+          "metric": "error_count",
+          "target": null,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 0,
+          "recordOnly": true,
+          "tag": null
+        }
+      ]
+    },
+    {
+      "name": "Motion",
+      "kind": "core",
+      "items": [
+        {
+          "metric": "task_on_time",
+          "target": 90,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "content_produced",
+          "target": 2,
+          "targetPer": "week",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "project_revision",
+          "target": 2,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "visual_consistency",
+          "target": 80,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "tech_support",
+          "target": 80,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "idea",
+          "target": 2,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": "skill_contribution"
+        }
+      ]
+    },
+    {
+      "name": "Developer Junior",
+      "kind": "core",
+      "items": [
+        {
+          "metric": "task_on_time",
+          "target": 90,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "bug_rate",
+          "target": 10,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "project_contribution",
+          "target": 90,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "product_delivered",
+          "target": 2,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "bug_fix_on_time",
+          "target": 80,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "active_project",
+          "target": null,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 0,
+          "recordOnly": true,
+          "tag": null
+        }
+      ]
+    },
+    {
+      "name": "PM",
+      "kind": "core",
+      "items": [
+        {
+          "metric": "project_delivery_rate",
+          "target": 90,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 2,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "testimony",
+          "target": 100,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "timely_reporting",
+          "target": 100,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "tech_reliability",
+          "target": 90,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        },
+        {
+          "metric": "self_improvement",
+          "target": 2,
+          "targetPer": "month",
+          "scorePeriod": "monthly",
+          "weight": 1,
+          "recordOnly": false,
+          "tag": null
+        }
+      ]
+    }
+  ],
+  "jobRoles": [
+    {
+      "name": "Junior Designer (Content)",
+      "division": "design",
+      "level": 1,
+      "defaultAccess": "member",
+      "defaultModules": [],
+      "hasOkr": false,
+      "templates": [
+        "Design Junior (Content)"
+      ]
+    },
+    {
+      "name": "Senior Staff Designer",
+      "division": "design",
+      "level": 2,
+      "defaultAccess": "member",
+      "defaultModules": [],
+      "hasOkr": false,
+      "templates": [
+        "Design Core",
+        "Add-on: Technical Support"
+      ]
+    },
+    {
+      "name": "Specialist Designer",
+      "division": "design",
+      "level": 3,
+      "defaultAccess": "member",
+      "defaultModules": [],
+      "hasOkr": false,
+      "templates": [
+        "Design Core",
+        "Add-on: Technical Support",
+        "Add-on: Idea"
+      ]
+    },
+    {
+      "name": "Specialist & Lead Product",
+      "division": "design",
+      "level": 3,
+      "defaultAccess": "member",
+      "defaultModules": [],
+      "hasOkr": false,
+      "templates": [
+        "Design Core",
+        "Add-on: Technical Support",
+        "Add-on: Idea",
+        "Add-on: QC Product"
+      ]
+    },
+    {
+      "name": "Expert Designer",
+      "division": "design",
+      "level": 4,
+      "defaultAccess": "member",
+      "defaultModules": [],
+      "hasOkr": false,
+      "templates": [
+        "Design Core",
+        "Add-on: Creative Leadership",
+        "Add-on: Development"
+      ]
+    },
+    {
+      "name": "Motion Designer",
+      "division": "design",
+      "level": 3,
+      "defaultAccess": "member",
+      "defaultModules": [],
+      "hasOkr": false,
+      "templates": [
+        "Motion"
+      ]
+    },
+    {
+      "name": "Art Director",
+      "division": "design",
+      "level": 5,
+      "defaultAccess": "manager",
+      "defaultModules": [
+        "studio_report"
+      ],
+      "hasOkr": true,
+      "templates": [
+        "Design Core",
+        "Add-on: Internal Team"
+      ]
+    },
+    {
+      "name": "Creative Director",
+      "division": "design",
+      "level": 5,
+      "defaultAccess": "manager",
+      "defaultModules": [
+        "studio_report"
+      ],
+      "hasOkr": true,
+      "templates": [
+        "Design Core"
+      ]
+    },
+    {
+      "name": "Junior Web Developer",
+      "division": "development",
+      "level": 1,
+      "defaultAccess": "member",
+      "defaultModules": [],
+      "hasOkr": false,
+      "templates": [
+        "Developer Junior"
+      ]
+    },
+    {
+      "name": "Senior Web Developer",
+      "division": "development",
+      "level": 3,
+      "defaultAccess": "member",
+      "defaultModules": [],
+      "hasOkr": true,
+      "templates": []
+    },
+    {
+      "name": "Project Manager",
+      "division": "project",
+      "level": 3,
+      "defaultAccess": "manager",
+      "defaultModules": [],
+      "hasOkr": false,
+      "templates": [
+        "PM"
+      ]
+    },
+    {
+      "name": "Lead PM",
+      "division": "project",
+      "level": 5,
+      "defaultAccess": "manager",
+      "defaultModules": [],
+      "hasOkr": true,
+      "templates": [
+        "PM"
+      ]
+    },
+    {
+      "name": "Account Lead",
+      "division": "sales",
+      "level": 3,
+      "defaultAccess": "member",
+      "defaultModules": [
+        "sales"
+      ],
+      "hasOkr": true,
+      "templates": []
+    },
+    {
+      "name": "HR",
+      "division": "people",
+      "level": 3,
+      "defaultAccess": "member",
+      "defaultModules": [
+        "people"
+      ],
+      "hasOkr": true,
+      "templates": []
+    },
+    {
+      "name": "Finance",
+      "division": "finance",
+      "level": 3,
+      "defaultAccess": "member",
+      "defaultModules": [
+        "finance"
+      ],
+      "hasOkr": false,
+      "templates": []
+    },
+    {
+      "name": "Founder / Executive",
+      "division": "executive",
+      "level": 5,
+      "defaultAccess": "manager",
+      "defaultModules": [
+        "studio_report"
+      ],
+      "hasOkr": false,
+      "templates": []
+    }
+  ],
+  "ratingForms": [
+    {
+      "metric": "collaboration",
+      "name": "Collaboration",
+      "frequency": "weekly",
+      "raterKind": "assigned",
+      "needsApproval": false,
+      "criteria": [
+        {
+          "title": "Responsif & komunikasi jelas",
+          "scale": [
+            "Sering tidak merespons",
+            "Respons lambat, sering perlu diingatkan",
+            "Respons wajar, kadang kurang jelas",
+            "Responsif dan jelas",
+            "Proaktif memberi update sebelum diminta"
+          ]
+        },
+        {
+          "title": "Menerima & menjalankan feedback",
+          "scale": [
+            "Mengabaikan feedback",
+            "Menjalankan sebagian",
+            "Menjalankan, perlu diulang",
+            "Menjalankan dengan tepat",
+            "Menjalankan dan menyempurnakan"
+          ]
+        },
+        {
+          "title": "Inisiatif / ide",
+          "scale": [
+            "Tidak ada",
+            "Jarang, perlu diminta",
+            "Sesekali",
+            "Rutin memberi ide relevan",
+            "Ide yang dipakai dan berdampak"
+          ]
+        },
+        {
+          "title": "Kualitas hasil serahan",
+          "scale": [
+            "Harus diulang",
+            "Banyak perbaikan",
+            "Cukup, perlu poles",
+            "Siap dipakai dengan sedikit catatan",
+            "Siap dipakai tanpa catatan"
+          ]
+        }
+      ]
+    },
+    {
+      "metric": "visual_consistency",
+      "name": "Visual Consistency",
+      "frequency": "monthly",
+      "raterKind": "job_role",
+      "raterJobRole": "Art Director",
+      "needsApproval": false,
+      "criteria": [
+        {
+          "title": "Kesesuaian moodboard & brand guideline",
+          "scale": [
+            "Tidak sesuai",
+            "Banyak penyimpangan",
+            "Sesuai dengan beberapa penyimpangan",
+            "Sesuai, penyimpangan kecil",
+            "Sesuai penuh dan memperkuat brand"
+          ]
+        }
+      ]
+    },
+    {
+      "metric": "tech_reliability",
+      "name": "Technical Reliability & QC",
+      "frequency": "monthly",
+      "raterKind": "job_role",
+      "raterJobRole": "Art Director",
+      "needsApproval": false,
+      "criteria": [
+        {
+          "title": "Menjaga kualitas delivery project",
+          "scale": [
+            "Banyak masalah lolos ke klien",
+            "Beberapa masalah lolos",
+            "Masalah kecil lolos sesekali",
+            "Hampir tidak ada yang lolos",
+            "Tidak ada yang lolos, proses QC terdokumentasi"
+          ]
+        }
+      ]
+    },
+    {
+      "metric": "internal_team_rubric",
+      "name": "Internal Team (self-assessment)",
+      "frequency": "monthly",
+      "raterKind": "self",
+      "needsApproval": true,
+      "criteria": [
+        {
+          "title": "Problem solving",
+          "scale": [
+            "Masalah tim dibiarkan",
+            "Ditangani terlambat",
+            "Ditangani saat diminta",
+            "Ditangani cepat",
+            "Mencegah masalah sebelum terjadi"
+          ]
+        },
+        {
+          "title": "Kolaborasi & upskilling tim",
+          "scale": [
+            "Tidak ada pendampingan",
+            "Pendampingan jarang",
+            "Pendampingan saat diminta",
+            "Pendampingan rutin",
+            "Tim naik kemampuan terukur"
+          ]
+        }
+      ]
+    }
+  ],
+  "okrCycles": [
+    {
+      "name": "Q4 2026",
+      "startDate": "2026-10-01",
+      "endDate": "2026-12-31",
+      "status": "active"
+    }
+  ]
+}

@@ -11,6 +11,7 @@
 import { randomUUID } from "node:crypto";
 import { PrismaClient, type UserRole } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
+import { seedKpi } from "./seed-kpi";
 
 const prisma = new PrismaClient();
 const PASSWORD = process.env.SEED_PASSWORD ?? "odama-dev-123";
@@ -70,7 +71,7 @@ async function seedBusinessData() {
   const ana = people.find((p) => p.email === "ana@odama.io");
   if (ana) {
     const leave = addDays(monday(today), 7);
-    await prisma.capacityOverride.create({ data: { userId: ana.id, periodStart: day(leave), periodEnd: day(addDays(leave, 1)), availableHours: 0, reason: "Annual leave", createdBy: boss } });
+    await prisma.capacityOverride.create({ data: { userId: ana.id, periodStart: day(leave), periodEnd: day(addDays(leave, 1)), availableHours: 0, reason: "Annual leave", kind: "annual_leave", createdBy: boss } });
   }
   const year = Number(today.slice(0, 4));
   await prisma.revenueTarget.createMany({
@@ -110,10 +111,44 @@ async function seedBusinessData() {
   console.log("Seeded C-Level dashboard inputs (costs, capacity, targets, FX, retainer fees, past opex).");
 }
 
+/**
+ * HR's calendar (monthly report, BPJS, payroll, weekly timesheet review) and
+ * a few leave requests: two waiting for HR, one approved — approved as HR
+ * through RLS, so the trigger writes its capacity override like the app does.
+ */
+async function seedHr() {
+  const by = async (email: string) => (await prisma.profile.findUnique({ where: { email } }))?.id;
+  const [hr, dimas, sekar, bayu] = await Promise.all(["nadia@odama.io", "dimas@odama.io", "sekar@odama.io", "bayu@odama.io"].map(by));
+  if (!hr || (await prisma.hrEvent.count()) > 0) return;
+  const month = `${today.slice(0, 7)}-01`;
+  const series = addDays(month, -62).slice(0, 8) + "01";
+  await prisma.hrEvent.createMany({
+    data: [
+      { title: "Monthly HR report", color: "blue", startDate: day(series), endDate: day(addDays(series, 4)), recurrence: "monthly", notes: "Headcount, attendance and leave summary for C-Level.", createdBy: hr },
+      { title: "BPJS payment deadline", color: "amber", startDate: day(addDays(series, 5)), endDate: day(addDays(series, 9)), recurrence: "monthly", createdBy: hr },
+      { title: "Payroll processing", color: "red", startDate: day(addDays(series, 24)), endDate: day(addDays(series, 26)), recurrence: "monthly", createdBy: hr },
+      { title: "Timesheet review", color: "green", startDate: day(monday(series)), endDate: day(monday(series)), allDay: false, startTime: "10:00", endTime: "10:30", recurrence: "weekly", createdBy: hr },
+      { title: "Performance review cycle", color: "purple", startDate: day(addDays(month, 19)), endDate: day(addDays(month, 23)), createdBy: hr },
+    ],
+  });
+  const nextMonday = addDays(monday(today), 7);
+  if (dimas) await prisma.leaveRequest.create({ data: { userId: dimas, kind: "annual_leave", startDate: day(addDays(nextMonday, 3)), endDate: day(addDays(nextMonday, 4)), reason: "Family wedding in Yogyakarta" } });
+  if (sekar) await prisma.leaveRequest.create({ data: { userId: sekar, kind: "permit", startDate: day(addDays(today, 2)), endDate: day(addDays(today, 2)), halfDay: true, reason: "Doctor's appointment" } });
+  if (bayu) {
+    const r = await prisma.leaveRequest.create({ data: { userId: bayu, kind: "annual_leave", startDate: day(addDays(nextMonday, 7)), endDate: day(addDays(nextMonday, 9)), reason: "Holiday" } });
+    const claims = JSON.stringify({ sub: hr, role: "authenticated" });
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('request.jwt.claims', ${claims}, true), set_config('role', 'authenticated', true)`;
+      await tx.leaveRequest.update({ where: { id: r.id }, data: { status: "approved", decisionNote: "Enjoy!" } });
+    });
+  }
+}
+
 async function main() {
   if ((await prisma.project.count()) > 0) {
     console.log("Database already has projects — skipping the base seed.");
     await seedBusinessData();
+    await seedHr();
     return;
   }
 
@@ -333,6 +368,8 @@ async function main() {
   });
 
   await seedBusinessData();
+  await seedHr();
+  await seedKpi(prisma);
 
   console.log(`Seeded ${PEOPLE.length} people, 2 clients, 3 projects, ${Object.keys(tasks).length} tasks, ${entries.length} time entries.`);
   console.log(`Sign in as any seeded email${process.env.NEXT_PUBLIC_SUPABASE_URL ? ` with password ${PASSWORD}` : " via DEV_AUTH_EMAIL"}.`);

@@ -4,7 +4,7 @@ import { requireAccess } from "@/lib/auth";
 import { perms } from "@/lib/roles";
 import { getInvoice, getInvoiceDocument } from "@/lib/invoices/queries";
 import { getSettings } from "@/lib/settings";
-import { INVOICE_STATUS_LABELS } from "@/lib/invoices/pure";
+import { INVOICE_KIND_LABELS, INVOICE_STATUS_LABELS, PLATFORM_LABELS } from "@/lib/invoices/pure";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
@@ -12,6 +12,7 @@ import { MoneyText } from "@/components/money-text";
 import { InvoiceDocument } from "@/components/invoice/invoice-document";
 import { InvoiceActions } from "./invoice-actions";
 import { RequestLinks } from "./request-links";
+import { PaymentProofs } from "./payment-proofs";
 
 export default async function InvoicePage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireAccess(perms.viewInvoices);
@@ -84,6 +85,20 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
               <dt className="text-muted-foreground text-caption">Created by</dt>
               <dd>{inv.createdBy ?? "—"}</dd>
             </div>
+            <div>
+              <dt className="text-muted-foreground text-caption">Type</dt>
+              <dd>{inv.kind ? INVOICE_KIND_LABELS[inv.kind] : "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground text-caption">Paid via</dt>
+              <dd>{PLATFORM_LABELS[inv.platform]}</dd>
+            </div>
+            {inv.currency !== "IDR" && (
+              <div className="col-span-2">
+                <dt className="text-muted-foreground text-caption">Rate at issue</dt>
+                <dd className="tabular">{inv.fxRateAtIssue === null ? "Not recorded" : `${formatMoney(inv.fxRateAtIssue, "IDR")} per ${inv.currency}`}</dd>
+              </div>
+            )}
           </dl>
 
           <section className="flex flex-col gap-2">
@@ -94,7 +109,9 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           <section className="flex flex-col gap-2">
             <h3 className="text-body font-medium">Payments</h3>
             {inv.payments.length === 0 ? (
-              <p className="text-muted-foreground text-body">No payments yet. They&apos;re recorded automatically from Xendit.</p>
+              <p className="text-muted-foreground text-body">
+                {inv.platform === "xendit" ? "No payments yet. They're recorded automatically from Xendit." : "No payments yet. A verified proof is recorded here."}
+              </p>
             ) : (
               <ul className="flex flex-col gap-2 text-body">
                 {inv.payments.map((p) => (
@@ -109,11 +126,16 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
                       {p.fee !== null && ` · fee ${formatMoney(p.fee, p.currency)}`}
                     </p>
                     {p.needsReview && <p className="text-warning mt-1 text-caption">Amount differs from the request — Finance should review.</p>}
+                    {fxDifference(inv.fxRateAtIssue, p) !== null && (
+                      <p className="text-muted-foreground mt-1 text-caption">FX difference vs issue: {formatMoney(fxDifference(inv.fxRateAtIssue, p)!, "IDR")}</p>
+                    )}
                   </li>
                 ))}
               </ul>
             )}
           </section>
+
+          <PaymentProofs invoice={inv} today={inv.today} />
 
           <section className="flex flex-col gap-2">
             <h3 className="text-body font-medium">Sent to client</h3>
@@ -141,4 +163,10 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
       </div>
     </div>
   );
+}
+
+/** Phase 2 · M9 — what the rate moved between issue and payment, in IDR (positive = gained). */
+function fxDifference(issueRate: number | null, p: { amount: number; currency: string; fxRate: number | null }): number | null {
+  if (p.currency === "IDR" || issueRate === null || p.fxRate === null) return null;
+  return Math.round(p.amount * (p.fxRate - issueRate));
 }

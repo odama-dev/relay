@@ -37,6 +37,7 @@ export function ProjectFormDialog({
   canEditContract,
   defaults,
   project,
+  dealId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -47,6 +48,8 @@ export function ProjectFormDialog({
   defaults: ProjectInput;
   /** Present when editing. */
   project?: { id: string; code: string };
+  /** A won deal this new project comes from (Phase 2 · M9). */
+  dealId?: string;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -57,6 +60,7 @@ export function ProjectFormDialog({
           canEditContract={canEditContract}
           defaults={defaults}
           project={project}
+          dealId={dealId}
           onDone={() => onOpenChange(false)}
         />
       </DialogContent>
@@ -70,6 +74,7 @@ function ProjectForm({
   canEditContract,
   defaults,
   project,
+  dealId,
   onDone,
 }: {
   clients: ClientChoice[];
@@ -77,6 +82,7 @@ function ProjectForm({
   canEditContract: boolean;
   defaults: ProjectInput;
   project?: { id: string; code: string };
+  dealId?: string;
   onDone: () => void;
 }) {
   const router = useRouter();
@@ -107,7 +113,7 @@ function ProjectForm({
       router.refresh();
       return;
     }
-    const res = await createProject(values);
+    const res = await createProject(values, dealId);
     if (!res.ok) return void toast.error(res.error);
     toast.success(`Project ${res.data.code} created`);
     onDone();

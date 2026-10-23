@@ -1,5 +1,5 @@
 import "server-only";
-import type { EmploymentType, Prisma, UserRole, UserStatus } from "@prisma/client";
+import type { AccessLevel, AppModule, Division, EmploymentType, Prisma, UserRole, UserStatus } from "@prisma/client";
 import { asUser, type CurrentUser } from "@/lib/auth";
 import { USER_ROLES } from "@/lib/roles";
 
@@ -14,6 +14,15 @@ export type PersonRow = {
   status: UserStatus;
   slackLinked: boolean;
   timezone: string;
+  jobRoleId: string | null;
+  jobRoleName: string | null;
+  division: Division | null;
+  level: number | null;
+  jobTitle: string | null;
+  accessLevel: AccessLevel;
+  managerId: string | null;
+  managerName: string | null;
+  modules: AppModule[];
 };
 
 export type PeopleFilters = { q?: string; role?: UserRole; status: UserStatus };
@@ -45,7 +54,17 @@ export async function listPeople(user: CurrentUser, filters: PeopleFilters): Pro
         }
       : {}),
   };
-  const rows = await asUser(user, (tx) => tx.profile.findMany({ where, orderBy: { fullName: "asc" } }));
+  const rows = await asUser(user, (tx) =>
+    tx.profile.findMany({
+      where,
+      orderBy: { fullName: "asc" },
+      include: {
+        jobRole: { select: { name: true } },
+        manager: { select: { fullName: true } },
+        modules: { select: { module: true } },
+      },
+    }),
+  );
   return rows.map((p) => ({
     id: p.id,
     fullName: p.fullName,
@@ -57,6 +76,15 @@ export async function listPeople(user: CurrentUser, filters: PeopleFilters): Pro
     status: p.status,
     slackLinked: Boolean(p.slackUserId),
     timezone: p.timezone,
+    jobRoleId: p.jobRoleId,
+    jobRoleName: p.jobRole?.name ?? null,
+    division: p.division,
+    level: p.level,
+    jobTitle: p.jobTitle,
+    accessLevel: p.accessLevel,
+    managerId: p.managerId,
+    managerName: p.manager?.fullName ?? null,
+    modules: p.modules.map((m) => m.module),
   }));
 }
 
@@ -75,4 +103,14 @@ export async function activePeopleOptions(user: CurrentUser, roles?: UserRole[])
     }),
   );
   return rows.map((p) => ({ id: p.id, name: p.fullName, role: p.role }));
+}
+
+export type JobRoleOption = { id: string; name: string; division: Division; level: number; defaultAccess: AccessLevel; defaultModules: AppModule[] };
+
+/** Active job roles for the person dialog (Phase 2 catalogue). */
+export async function jobRoleOptions(user: CurrentUser): Promise<JobRoleOption[]> {
+  const rows = await asUser(user, (tx) =>
+    tx.jobRole.findMany({ where: { archivedAt: null }, orderBy: [{ division: "asc" }, { level: "asc" }, { name: "asc" }] }),
+  );
+  return rows.map((r) => ({ id: r.id, name: r.name, division: r.division, level: r.level, defaultAccess: r.defaultAccess, defaultModules: r.defaultModules }));
 }

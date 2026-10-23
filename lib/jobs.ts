@@ -6,8 +6,10 @@ import { alreadyNotified, notify } from "@/lib/notify";
 import { checkBudgetAlerts } from "@/lib/health/alerts";
 import { freezeRetainerMonths } from "@/lib/health/queries";
 import { checkOverdueInvoices } from "@/lib/invoices/payments";
-import { addDays, isoWeekday, parseIsoDate, todayIn, weekStart } from "@/lib/time/pure";
+import { addDays, addMonths, isoWeekday, monthStart, parseIsoDate, todayIn, weekStart } from "@/lib/time/pure";
+import { kpiContext, snapshotKpi } from "@/lib/kpi/engine";
 import { formatDuration } from "@/lib/format";
+import { snapshotPipeline } from "@/lib/sales/queries";
 
 /**
  * Scheduled jobs (PRD "Job terjadwal", WIB). The VPS cron calls
@@ -112,6 +114,67 @@ async function budgetAlerts() {
   return checkBudgetAlerts(projects.map((p) => p.id));
 }
 
+/**
+ * Hourly (Phase 2) — open reviews past their one-working-day SLA: the
+ * reviewer and the project's PM hear once per round; the PM can hand the
+ * review to someone else from the task.
+ */
+async function reviewSla() {
+  const late = await prisma.reviewRound.findMany({
+    where: { decidedAt: null, slaDueAt: { lt: new Date() }, slaNotifiedAt: null, task: { status: "review" } },
+    select: {
+      id: true,
+      reviewerId: true,
+      task: { select: { id: true, title: true, projectId: true, project: { select: { code: true, pmId: true } } } },
+      reviewer: { select: { fullName: true } },
+    },
+  });
+  let sent = 0;
+  for (const r of late) {
+    const path = `/projects/${r.task.projectId}?task=${r.task.id}`;
+    const to = [...new Set([r.reviewerId, r.task.project.pmId].filter((x): x is string => Boolean(x)))];
+    for (const id of to) {
+      await notify(id, "review_sla_missed", {
+        title: `Review past its SLA: ${r.task.title}`,
+        body: `${r.task.project.code} · waiting on ${r.reviewer?.fullName ?? "no reviewer"}${id === r.task.project.pmId ? " — you can hand it to another reviewer" : ""}`,
+        path,
+        refId: r.id,
+      });
+      sent++;
+    }
+    await prisma.reviewRound.update({ where: { id: r.id }, data: { slaNotifiedAt: new Date() } });
+  }
+  return { late: late.length, sent };
+}
+
+/**
+ * 1st of the month, 01:00 (Phase 2) — records last month's KPI for everyone
+ * who has one (kpi_results, never recomputed); on 1 January and 1 July also
+ * the half-year just ended. Objections are open for 7 days from now.
+ */
+async function kpiSnapshot() {
+  const today = todayIn(STUDIO_TZ);
+  const lastMonth = addMonths(monthStart(today), -1);
+  const semesterEnded = today.slice(5, 7) === "01" || today.slice(5, 7) === "07";
+  const people = await prisma.profile.findMany({ where: { status: "active" }, select: { id: true } });
+  const ctx = await kpiContext();
+  let monthly = 0;
+  let semester = 0;
+  for (const p of people) {
+    if (await snapshotKpi(p.id, "monthly", lastMonth, ctx)) {
+      monthly++;
+      await notify(p.id, "kpi_recorded", { title: "Your KPI for last month is recorded", body: "You have 7 days to raise an objection.", path: "/kpi?tab=history", refId: `${p.id}:${lastMonth}` });
+    }
+    if (semesterEnded && (await snapshotKpi(p.id, "semester", lastMonth, ctx))) semester++;
+  }
+  return { people: people.length, monthly, semester };
+}
+
+/** 23:55 daily (Phase 2 · M9) — today's pipeline value, for the Sales report candles. */
+async function pipelineSnapshot() {
+  return snapshotPipeline(todayIn(STUDIO_TZ));
+}
+
 export const JOBS = {
   "due-reminders": dueReminders,
   "time-reminders": timeReminders,
@@ -120,6 +183,9 @@ export const JOBS = {
   "retainer-rollover": retainerRollover,
   "overdue-invoices": overdueInvoices,
   "budget-alerts": budgetAlerts,
+  "review-sla": reviewSla,
+  "kpi-snapshot": kpiSnapshot,
+  "pipeline-snapshot": pipelineSnapshot,
 } as const;
 
 export type JobName = keyof typeof JOBS;

@@ -1,126 +1,148 @@
-import { getApprovalQueues } from "@/lib/time/approvals";
-import { loadComplianceSummary, loadTasksPerPerson, loadTeamComposition } from "@/lib/dashboard/queries";
-import { employmentLabel, roleLabel } from "@/lib/roles";
-import { formatRelative } from "@/lib/format";
-import { CardFigure, CardGroupLabel, CardList, DashboardCard, cardRowClass } from "@/components/dashboard-card";
+import { Suspense, type ReactNode } from "react";
+import type { CurrentUser } from "@/lib/auth";
+import { dashboardContext } from "@/lib/dashboard/queries";
+import { perms, roleLabel } from "@/lib/roles";
+import { greeting } from "@/lib/dashboard/pure";
+import { loadHrAgenda, loadHrCalendar, loadLeaveOverview, loadTeam } from "@/lib/hr/queries";
+import { isIsoDate, monthStart, timeIn } from "@/lib/time/pure";
+import { formatDateLong } from "@/lib/format";
+import { PageHeader } from "@/components/page-header";
+import { RefreshButton } from "@/components/refresh-button";
 import { LinkButton } from "@/components/link-button";
-import { CorrectionsQueue } from "@/app/(app)/approvals/corrections-queue";
-import { cn } from "@/lib/utils";
-import { defineCard } from "./card";
-import { ResendInviteButton, TasksPerPersonTable } from "./widgets";
+import { SummaryStrip } from "@/components/summary-strip";
+import { Skeleton } from "@/components/ui/skeleton";
+import { DataTableSkeleton } from "@/components/page-skeletons";
+import { HrCalendar } from "@/components/hr/hr-calendar";
+import { TeamTodayTable } from "@/components/hr/team-tables";
+import { LeaveOverview } from "@/components/hr/leave";
+import { AgendaList } from "@/components/hr/agenda-list";
+import { AgendaLeaveTabs } from "@/components/hr/agenda-leave-tabs";
+import { FilterBar } from "@/components/filter-bar";
+import { SectionBody } from "./clevel/parts";
+import { StripSkeleton } from "./kpi";
 
-const WEEKDAY = new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: "UTC" });
-
-/** HR-1 — who hasn't logged time this week. */
-export const ComplianceCard = defineCard({ id: "HR-1", title: "Time logging this week", span: "wide" }, loadComplianceSummary, (d, _ctx, meta) => (
-  <DashboardCard
-    {...meta}
-    count={d.incomplete.length}
-    countTone="warning"
-    action={
-      <>
-        <LinkButton size="compact" variant="ghost" icon="csv" external href={`/api/compliance?week=${d.weekStart}`}>
-          CSV
-        </LinkButton>
-        <LinkButton size="compact" variant="tertiary" href={`/people/compliance?week=${d.weekStart}`}>
-          Compliance
-        </LinkButton>
-      </>
-    }
-  >
-    <div className="flex flex-col gap-3">
-      <CardFigure label="Complete" value={`${d.complete} of ${d.people}`} hint="people logged every past workday" />
-      {d.incomplete.length === 0 ? (
-        <p className="text-muted-foreground text-body">Everyone has logged their time this week.</p>
-      ) : (
-        <div className="flex flex-col gap-1">
-          <CardGroupLabel label="Empty workdays" count={d.incomplete.length} tone="warning" />
-          <CardList>
-            {d.incomplete.slice(0, 8).map((p) => (
-              <li key={p.id} className={cardRowClass}>
-                <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                <span className="text-muted-foreground hidden w-36 shrink-0 truncate text-caption sm:block">{roleLabel(p.role)}</span>
-                <span className="flex shrink-0 gap-1">
-                  {p.missing.map((d) => (
-                    <span key={d} className="bg-warning/12 text-warning rounded-md px-1.5 text-micro">
-                      {WEEKDAY.format(new Date(`${d}T00:00:00Z`))}
-                    </span>
-                  ))}
-                </span>
-              </li>
-            ))}
-          </CardList>
-          {d.incomplete.length > 8 && <p className="text-muted-foreground text-caption">{d.incomplete.length - 8} more on the compliance page</p>}
-        </div>
-      )}
-    </div>
-  </DashboardCard>
-));
-
-/** HR-2 — corrections to non-billable time, which HR reviews. */
-export const HrCorrectionsCard = defineCard({ id: "HR-2", title: "Time corrections", span: "narrow" }, (ctx) => getApprovalQueues(ctx.user), (q, _ctx, meta) => (
-  <DashboardCard
-    {...meta}
-    count={q.correctionRows.length}
-    countTone="warning"
-    action={{ label: "Approvals", href: "/approvals?tab=corrections" }}
-    isEmpty={q.correctionRows.length === 0}
-    emptyText="No corrections waiting."
-    emptyIcon="approvals"
-  >
-    <CorrectionsQueue rows={q.correctionRows.slice(0, 5)} />
-  </DashboardCard>
-));
-
-/** HR-3 — who's overloaded or falling behind. */
-export const TasksPerPersonCard = defineCard({ id: "HR-3", title: "Tasks per person", span: "wide" }, loadTasksPerPerson, (rows, _ctx, meta) => (
-  <DashboardCard {...meta} isEmpty={rows.length === 0} emptyText="No active people yet." emptyIcon="people">
-    <TasksPerPersonTable rows={rows} />
-  </DashboardCard>
-));
-
-/** HR-4 — the team by employment type and role; invitations still open. */
-export const TeamCompositionCard = defineCard({ id: "HR-4", title: "Team", span: "narrow" }, loadTeamComposition, (d, _ctx, meta) => (
-  <DashboardCard {...meta} action={{ label: "People", href: "/people" }}>
-    <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-3">
-        <CardFigure label="Active people" value={d.total} />
-        <CardFigure label="Invited" value={d.invited.length} hint={d.invited.length ? "not signed in yet" : undefined} tone={d.invited.length ? "warning" : undefined} />
+/**
+ * The HR dashboard: today's team in one strip, HR's own calendar beside
+ * today's agenda and leave requests, then the whole team today — what each
+ * person is on and their week's workload.
+ */
+export function HrDashboard({ user, searchParams }: { user: CurrentUser; searchParams: Record<string, string | string[] | undefined> }) {
+  const ctx = dashboardContext(user);
+  // The calendar: ?view=week&week=yyyy-mm-dd, or ?month=yyyy-mm (default: this month).
+  const view = searchParams.view === "week" ? "week" : "month";
+  const rawMonth = typeof searchParams.month === "string" ? `${searchParams.month}-01` : "";
+  const anchor = view === "week" ? (isIsoDate(searchParams.week) ? searchParams.week : ctx.today) : isIsoDate(rawMonth) ? rawMonth : monthStart(ctx.today);
+  // Each load is shared by the strip and the section below it.
+  const team = loadTeam(user, ctx.today);
+  const leave = loadLeaveOverview(user, ctx.today);
+  // Search on the Team today table: by name or role.
+  const q = typeof searchParams.q === "string" ? searchParams.q.trim().toLowerCase() : "";
+  const firstName = user.fullName.split(" ")[0] || user.fullName;
+  return (
+    <div className="flex flex-col">
+      <PageHeader title={`${greeting(timeIn(user.timezone))}, ${firstName}`} description={`${formatDateLong(ctx.today)} · ${roleLabel(user.role)}`} actions={
+          <>
+            {perms.managePeopleModule(user) && (
+              <LinkButton href="/performance" icon="intelligence" variant="secondary" size="compact">
+                KPI & OKR builder
+              </LinkButton>
+            )}
+            <RefreshButton />
+          </>
+        }
+        className="bleed mb-0"
+      />
+      <Suspense fallback={<StripSkeleton items={4} />}>
+        <SectionBody title="Today" load={() => Promise.all([team, leave])}>
+          {([t, l]) => <HrStrip team={t} leave={l} />}
+        </SectionBody>
+      </Suspense>
+      {/* Calendar and the agenda / leave column share one full-width row, split by a hairline. */}
+      <div className="bleed grid border-b px-0! lg:grid-cols-[minmax(0,1fr)_360px]">
+        <Suspense fallback={<Skeleton className="m-6 h-[680px] rounded-xl" />}>
+          <SectionBody title="HR calendar" load={() => loadHrCalendar(user, view, anchor)}>
+            {(cal) => (
+              <HrCalendar
+                view={cal.view}
+                month={cal.month}
+                weekStart={cal.weekStart}
+                today={ctx.today}
+                timezone={user.timezone}
+                occurrences={cal.occurrences}
+                series={cal.series}
+                leave={cal.leave}
+                obligations={cal.obligations}
+                canEdit={perms.manageHrCalendar(user)}
+              />
+            )}
+          </SectionBody>
+        </Suspense>
+        <aside aria-label="Agenda & leave" className="flex min-w-0 flex-col gap-2 border-t px-[var(--page-gutter,1rem)] pb-5 lg:border-t-0 lg:border-l">
+          <h2 className="text-subtitle flex min-h-14 items-center font-semibold">Agenda &amp; leave</h2>
+          <Suspense fallback={<Skeleton className="h-64 rounded-xl" />}>
+            <SectionBody title="Agenda & leave" load={() => Promise.all([loadHrAgenda(user, ctx.today), leave])}>
+              {([agenda, l]) => (
+                <AgendaLeaveTabs
+                  initial={l.pending.length ? "leave" : "agenda"}
+                  agendaCount={agenda.today.length}
+                  leaveCount={l.pending.length}
+                  agenda={<AgendaList today={ctx.today} events={agenda.today} upcoming={agenda.upcoming} later={agenda.later} />}
+                  leave={<LeaveOverview pending={l.pending} upcoming={l.upcoming} viewerId={user.id} />}
+                />
+              )}
+            </SectionBody>
+          </Suspense>
+        </aside>
       </div>
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-body">
-        {d.byType.map((t) => (
-          <div key={t.type} className="contents">
-            <dt className="text-muted-foreground">{employmentLabel(t.type)}</dt>
-            <dd className="tabular text-right">{t.count}</dd>
-          </div>
-        ))}
-      </dl>
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-body">
-        {d.byRole.map((r) => (
-          <div key={r.role} className="contents">
-            <dt className="text-muted-foreground truncate">{roleLabel(r.role)}</dt>
-            <dd className="tabular text-right">{r.count}</dd>
-          </div>
-        ))}
-      </dl>
-      {d.invited.length > 0 && (
-        <div className="flex flex-col gap-1">
-          <CardGroupLabel label="Waiting to join" count={d.invited.length} />
-          <CardList>
-            {d.invited.map((p) => (
-              <li key={p.id} className={cn(cardRowClass, "py-1.5")}>
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate">{p.name}</span>
-                  <span className="text-muted-foreground truncate text-caption">
-                    {roleLabel(p.role)} · invited {formatRelative(p.invitedAt)}
-                  </span>
-                </span>
-                <ResendInviteButton personId={p.id} />
-              </li>
-            ))}
-          </CardList>
-        </div>
-      )}
+      <TableSection title="Team today" cols={6} actions={<FilterBar variant="bare" searchPlaceholder="Search people" />}>
+        <SectionBody title="Team today" load={() => team}>
+          {(t) => <TeamTodayTable rows={q ? t.today.filter((r) => `${r.name} ${roleLabel(r.role)}`.toLowerCase().includes(q)) : t.today} today={ctx.today} />}
+        </SectionBody>
+      </TableSection>
     </div>
-  </DashboardCard>
-));
+  );
+}
+
+function TableSection({ title, cols, actions, children }: { title: string; cols: number; actions?: ReactNode; children: ReactNode }) {
+  return (
+    <section aria-label={title} className="flex flex-col">
+      <div className="bleed flex min-h-12 items-center justify-between gap-3 border-b py-2">
+        <h2 className="text-body font-medium">{title}</h2>
+        {actions}
+      </div>
+      <Suspense fallback={<DataTableSkeleton cols={cols} rows={6} />}>{children}</Suspense>
+    </section>
+  );
+}
+
+function HrStrip({ team, leave }: { team: Awaited<ReturnType<typeof loadTeam>>; leave: Awaited<ReturnType<typeof loadLeaveOverview>> }) {
+  // Attendance, not logged hours (PRD Phase 2 "Working today").
+  const working = team.today.filter((r) => r.status === "present" || r.status === "remote").length;
+  const expected = team.today.filter((r) => r.status === "present" || r.status === "remote" || r.status === "not_checked_in").length;
+  const over = team.workload.filter((r) => r.pct !== null && r.pct > 100).length;
+  return (
+    <SummaryStrip
+      variant="even"
+      items={[
+        { label: "Working today", values: [`${working} of ${expected}`], delta: <span className="text-muted-foreground text-caption">{expected - working} not checked in yet</span> },
+        {
+          label: "Away today",
+          values: [leave.today.length],
+          delta: <span className="text-muted-foreground text-caption">{leave.upcoming.length} booked in the next 30 days</span>,
+        },
+        {
+          label: "Leave requests",
+          tone: leave.pending.length ? "destructive" : "default",
+          values: [leave.pending.length],
+          delta: <span className="text-muted-foreground text-caption">{leave.pending.length ? "Waiting for a decision" : "Nothing waiting"}</span>,
+        },
+        {
+          label: "Workload over capacity",
+          tone: over ? "destructive" : "default",
+          values: [over],
+          delta: <span className="text-muted-foreground text-caption">More work due this week than hours</span>,
+        },
+      ]}
+    />
+  );
+}

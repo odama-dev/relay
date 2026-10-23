@@ -1,100 +1,59 @@
-import type { ComponentType } from "react";
-import type { UserRole } from "@prisma/client";
 import { requireUser } from "@/lib/auth";
-import { perms, roleLabel } from "@/lib/roles";
-import { dashboardPhase2 } from "@/lib/env";
-import { dashboardContext, type DashboardContext } from "@/lib/dashboard/queries";
-import { greeting } from "@/lib/dashboard/pure";
-import { formatDateLong } from "@/lib/format";
-import { timeIn } from "@/lib/time/pure";
-import { PageHeader } from "@/components/page-header";
-import { RefreshButton } from "@/components/refresh-button";
-import { DashboardCard, DashboardGrid, type CardSpan } from "@/components/dashboard-card";
+import { perms } from "@/lib/roles";
+import { dashboardContext } from "@/lib/dashboard/queries";
 import { TaskPanel } from "@/components/tasks/task-panel";
-import { DueTasksCard, MonthSummaryCard, RecentCommentsCard, WeekHoursCard } from "./designer-dev";
-import { ApprovalQueueCard, MyProjectHealthCard, ProjectBillingCard, TasksAtRiskCard } from "./pm";
+import { DesignerDevDashboard } from "./designer-dev";
+import { PmDashboard } from "./pm";
 import { ClevelDashboard } from "./clevel/clevel-dashboard";
-import { ComplianceCard, HrCorrectionsCard, TasksPerPersonCard, TeamCompositionCard } from "./hr";
-import { DueAndLateCard, IncomingPaymentsCard, OutstandingByClientCard, UnmatchedPaymentsCard } from "./finance";
-import { ActiveClientsCard, DraftInvoicesCard, MyInvoicesCard, UninvoicedProjectsCard } from "./sales";
+import { HrDashboard } from "./hr";
+import { FinanceDashboard } from "./finance";
+import { SalesDashboard } from "./sales";
+import { ForYou } from "./phase2-cards";
 
 export const metadata = { title: "Dashboard" };
 
-type Card = ComponentType<{ ctx: DashboardContext }>;
-
 /**
- * Phase 1 cards per role, in display order: what needs action first, then the
- * numbers (PRD/OVERVIEW-SPEC.md §8). `is_admin` doesn't change the set (§1.1).
+ * The home screen after sign-in. Each role's dashboard is a preset (PRD
+ * Phase 2 "Revisi dashboard"); under it, "For you" adds the widgets that
+ * follow the person's responsibilities (lib/dashboard/phase2.ts). Every
+ * role has its own layout; Finance's is the operational one of Phase 2 · M10.
  */
-const CARDS: Record<Exclude<UserRole, "c_level">, Card[]> = {
-  designer_dev: [DueTasksCard, WeekHoursCard, RecentCommentsCard, MonthSummaryCard],
-  pm: [ApprovalQueueCard, MyProjectHealthCard, TasksAtRiskCard, ProjectBillingCard],
-  hr: [ComplianceCard, HrCorrectionsCard, TasksPerPersonCard, TeamCompositionCard],
-  finance: [UnmatchedPaymentsCard, IncomingPaymentsCard, DueAndLateCard, OutstandingByClientCard],
-  sales: [DraftInvoicesCard, MyInvoicesCard, ActiveClientsCard, UninvoicedProjectsCard],
-};
-
-/** Phase 2 slots, shown empty behind the `dashboard_phase2` flag (§1.5). */
-const PHASE2: Record<UserRole, { title: string; span: CardSpan }[]> = {
-  designer_dev: [
-    { title: "Workload this week", span: "narrow" },
-    { title: "KPI progress", span: "narrow" },
-  ],
-  pm: [{ title: "Team capacity this week", span: "narrow" }],
-  c_level: [{ title: "Pipeline from Attio", span: "narrow" }],
-  hr: [
-    { title: "KPI / OKR cycle", span: "narrow" },
-    { title: "Workload per person", span: "narrow" },
-  ],
-  finance: [{ title: "Month so far", span: "narrow" }],
-  sales: [
-    { title: "Won deals without a project", span: "narrow" },
-    { title: "Team capacity", span: "narrow" },
-  ],
-};
-
-/** The home screen after sign-in: one dashboard per role. C-Level has its own (PRD/Clevel dashboard.md). */
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
   if (user.role === "c_level") {
     return (
       <>
         <ClevelDashboard user={user} searchParams={await searchParams} />
-        {dashboardPhase2 && <Phase2 role="c_level" />}
+        <ForYou ctx={dashboardContext(user)} user={user} />
       </>
     );
   }
-  const ctx = dashboardContext(user);
-  const firstName = user.fullName.split(" ")[0] || user.fullName;
-
-  return (
-    <div className="flex flex-col gap-[16px]">
-      <PageHeader
-        title={`${greeting(timeIn(user.timezone))}, ${firstName}`}
-        description={`${formatDateLong(ctx.today)} · ${roleLabel(user.role)}`}
-        actions={<RefreshButton />}
-        className="mb-0"
-      />
-      <DashboardGrid>
-        {CARDS[user.role].map((CardSlot, i) => (
-          <CardSlot key={i} ctx={ctx} />
-        ))}
-      </DashboardGrid>
-      {dashboardPhase2 && <Phase2 role={user.role} />}
-      {perms.viewTasks(user) && <TaskPanel />}
-    </div>
-  );
-}
-
-function Phase2({ role }: { role: UserRole }) {
-  return (
-    <section aria-label="Coming in Phase 2" className="mt-4 flex flex-col gap-2">
-      <h2 className="text-muted-foreground text-caption">Coming in Phase 2</h2>
-      <DashboardGrid>
-        {PHASE2[role].map((c) => (
-          <DashboardCard key={c.title} title={c.title} span={c.span} phase2 />
-        ))}
-      </DashboardGrid>
-    </section>
-  );
+  if (user.role === "finance") {
+    return (
+      <>
+        <FinanceDashboard user={user} searchParams={await searchParams} />
+        {/* The preset already shows the Finance module's widgets. */}
+        <ForYou ctx={dashboardContext(user)} user={user} skip={["proofs", "aging", "obligations"]} />
+      </>
+    );
+  }
+  {
+    const sp = await searchParams;
+    return (
+      <>
+        {user.role === "sales" ? (
+          <SalesDashboard user={user} />
+        ) : user.role === "pm" ? (
+          <PmDashboard user={user} searchParams={sp} />
+        ) : user.role === "hr" ? (
+          <HrDashboard user={user} searchParams={sp} />
+        ) : (
+          <DesignerDevDashboard user={user} searchParams={sp} />
+        )}
+        {/* Sales keeps its dashboard to its own preset (no "For you"). */}
+        {user.role !== "sales" && <ForYou ctx={dashboardContext(user)} user={user} />}
+        {perms.viewTasks(user) && <TaskPanel />}
+      </>
+    );
+  }
 }

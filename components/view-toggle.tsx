@@ -11,10 +11,10 @@ export type ViewToggleOption<T extends string> = {
   label: string;
 };
 
-/** List/Kanban toggle, ready to use as-is. */
+/** Kanban/List toggle, ready to use as-is. Kanban is the default view for every role. */
 export const LIST_KANBAN_OPTIONS: ViewToggleOption<ViewMode>[] = [
-  { mode: "list", icon: "list", label: "List" },
   { mode: "kanban", icon: "kanban", label: "Kanban" },
+  { mode: "list", icon: "list", label: "List" },
 ];
 
 /**

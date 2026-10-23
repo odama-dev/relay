@@ -28,10 +28,19 @@ export const navGroups: NavGroup[] = [
   {
     label: "Work",
     items: [
-      { label: "Projects", href: "/projects", icon: "projects" },
-      { label: "Clients", href: "/clients", icon: "clients", visible: perms.viewClients },
+      { label: "Projects", href: "/projects", icon: "projects", visible: (v) => v.role !== "sales" },
+      { label: "Clients", href: "/clients", icon: "clients", visible: (v) => perms.viewClients(v) && v.role !== "sales" },
       { label: "Project Health", href: "/health", icon: "health", visible: perms.viewHealthOverview },
       { label: "Approvals", href: "/approvals", icon: "approvals", visible: perms.reviewApprovals },
+    ],
+  },
+  {
+    label: "Sales",
+    items: [
+      { label: "Pipeline", href: "/sales", icon: "trend", visible: perms.viewPipeline, exact: true },
+      { label: "Companies", href: "/sales/companies", icon: "clients", visible: perms.viewPipeline },
+      { label: "People", href: "/sales/people", icon: "user", visible: perms.viewPipeline },
+      { label: "Sales Report", href: "/sales/report", icon: "bar", visible: perms.viewPipeline },
     ],
   },
   {
@@ -44,11 +53,23 @@ export const navGroups: NavGroup[] = [
     ],
   },
   {
+    label: "Performance",
+    items: [
+      { label: "KPI", href: "/kpi", icon: "target" },
+      { label: "OKR", href: "/okr", icon: "flag" },
+      { label: "Work Log", href: "/work-log", icon: "checklist" },
+      { label: "Ratings", href: "/ratings", icon: "star" },
+      { label: "KPI & OKR Builder", href: "/performance", icon: "intelligence", visible: perms.managePeopleModule },
+    ],
+  },
+  {
     label: "Team",
     items: [
       { label: "People", href: "/people", icon: "people", exact: true },
       { label: "Time Compliance", href: "/people/compliance", icon: "time", visible: perms.viewCompliance },
+      { label: "People Setup", href: "/people/setup", icon: "checklist", visible: perms.managePeopleModule },
       { label: "Business Data", href: "/business", icon: "target", visible: perms.viewBusinessData },
+      { label: "Metric Dictionary", href: "/metrics", icon: "info" },
     ],
   },
 ];

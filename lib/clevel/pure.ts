@@ -167,6 +167,7 @@ export function availableHours(
   employment: Employment,
   w: Window,
   workdays: number[],
+  holidays: ReadonlySet<IsoDate> = new Set(),
 ): number | null {
   const active = overlap(w, { start: employment.activeFrom, end: employment.activeTo ?? "9999-12-31" });
   if (!active) return 0;
@@ -174,10 +175,15 @@ export function availableHours(
   let total = 0;
   let found = false;
   for (const day of workdaysIn(active, workdays)) {
+    // Public holidays are nobody's working day (Metric Dictionary "Capacity").
+    if (holidays.has(day)) {
+      found ||= capacity.length > 0;
+      continue;
+    }
     const o = overrides.find((x) => x.start <= day && day <= x.end);
     if (o) {
       found = true;
-      total += o.availableHours / Math.max(1, workdaysIn({ start: o.start, end: o.end }, workdays).length);
+      total += o.availableHours / Math.max(1, workdaysIn({ start: o.start, end: o.end }, workdays).filter((d) => !holidays.has(d)).length);
       continue;
     }
     const row = effectiveAt(capacity, day);

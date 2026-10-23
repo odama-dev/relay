@@ -1,15 +1,21 @@
 import "server-only";
-import type { InvoiceStatus, PaymentRequestStatus, ProjectStatus, Prisma, TaskPriority, TaskStatus, UserRole, EmploymentType } from "@prisma/client";
+import { cache } from "react";
+import type { HrEventColor, InvoiceStatus, LeaveKind, PaymentRequestStatus, ProjectKind, ProjectStatus, Prisma, TaskPriority, TaskStatus, UserRole } from "@prisma/client";
 import { asUser, type CurrentUser } from "@/lib/auth";
 import { num, numOr0 } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
 import { formatMoney } from "@/lib/format";
+import { getIdrRates } from "@/lib/fx";
+import { normalizeToIdr } from "@/lib/invoices/pure";
 import { computeHealth } from "@/lib/health/queries";
 import { riskScore, type HealthStatus } from "@/lib/health/pure";
 import { getMyTasks } from "@/lib/tasks/queries";
-import { getCompliance } from "@/lib/time/compliance";
+import { sundayOf } from "@/lib/hr/pure";
+import { billableMinutes as billableMinutesOf, capacityHours as capacityHours_, isBillableEntry } from "@/lib/metrics/pure";
+import { capacityInputs, holidaySet } from "@/lib/metrics/queries";
+import { onTimeInputs } from "@/lib/tasks/timing";
 import { addDays, addMonths, isoDate, isoWeekday, monthStart, parseIsoDate, todayIn, weekDays, weekStart, type IsoDate } from "@/lib/time/pure";
-import { daysLate, onTimeRate, requestDueState, sumByCurrency, taskRisk, type DueState, type Money, type RiskKind } from "@/lib/dashboard/pure";
+import { daysLate, onTimeRate, PROJECT_STANDINGS, projectStanding, requestDueState, sumByCurrency, taskRisk, utilizationPct, type DueState, type Money, type ProjectStanding, type WorkPeriod } from "@/lib/dashboard/pure";
 
 /**
  * Data for the dashboard cards (PRD/OVERVIEW-SPEC.md). One loader per card,
@@ -39,7 +45,7 @@ const localDay = (ctx: DashboardContext, at: Date) => todayIn(ctx.user.timezone,
 /** A safe UTC lower bound for "since local day `d`" (filtered exactly with localDay afterwards). */
 const since = (d: IsoDate) => parseIsoDate(addDays(d, -1));
 
-const OPEN_INVOICE: InvoiceStatus[] = ["sent", "partially_paid", "overdue"];
+const OPEN_INVOICE: InvoiceStatus[] = ["sent", "partially_paid", "payment_submitted", "overdue"];
 const ACTIVE: ProjectStatus[] = ["active", "on_hold"];
 
 // ---------------------------------------------------------------------------
@@ -118,7 +124,7 @@ export async function loadRecentComments(ctx: DashboardContext): Promise<RecentC
       },
       include: { author: { select: { id: true, fullName: true, avatarUrl: true } }, task: { select: { id: true, title: true } } },
       orderBy: { createdAt: "desc" },
-      take: 5,
+      take: 8,
     }),
   );
   return rows.map((c) => {
@@ -134,27 +140,72 @@ export async function loadRecentComments(ctx: DashboardContext): Promise<RecentC
   });
 }
 
-/** DD-4 — tasks you own: completed this month, on-time rate, overdue now. */
-export async function loadMonthSummary(ctx: DashboardContext) {
-  const tasks = await asUser(ctx.user, (tx) =>
-    tx.task.findMany({
+export type TimelineProject = { id: string; code: string; name: string; kind: ProjectKind; startDate: IsoDate; endDate: IsoDate; openEnded: boolean; color: HrEventColor | null };
+export type TimelineTask = { id: string; title: string; projectId: string; projectCode: string; dueDate: IsoDate; status: TaskStatus };
+
+/**
+ * DD-4 — the calendar of your work for the weeks shown (the month's, or one
+ * Sunday-first week around `anchor`): active projects you're on (a member,
+ * or owning / helping on one of their tasks) from start to end — an open end
+ * runs to the grid's last day — your tasks due then, and the minutes you
+ * logged each day.
+ */
+export async function loadProjectCalendar(ctx: DashboardContext, view: "month" | "week", anchor: IsoDate) {
+  const uid = ctx.user.id;
+  const month = monthStart(anchor);
+  const weekStart = view === "week" ? sundayOf(anchor) : null;
+  const from = weekStart ?? sundayOf(month);
+  const to = weekStart ? addDays(weekStart, 6) : addDays(sundayOf(addDays(addMonths(month, 1), -1)), 6);
+  const mine: Prisma.TaskWhereInput = { OR: [{ ownerId: uid }, { collaborators: { some: { userId: uid } } }] };
+  const { projects, tasks, logged } = await asUser(ctx.user, async (tx) => ({
+    projects: await tx.project.findMany({
       where: {
-        ownerId: ctx.user.id,
-        section: { archivedAt: null },
-        OR: [
-          { completedAt: { gte: since(ctx.monthStart) } },
-          { status: { not: "done" }, dueDate: { lt: parseIsoDate(ctx.today) } },
-        ],
+        status: { in: ACTIVE },
+        startDate: { lte: parseIsoDate(to) },
+        AND: [{ OR: [{ endDate: null }, { endDate: { gte: parseIsoDate(from) } }] }, { OR: [{ members: { some: { userId: uid } } }, { tasks: { some: mine } }] }],
       },
-      select: { status: true, dueDate: true, completedAt: true },
+      select: { id: true, code: true, name: true, kind: true, startDate: true, endDate: true, calendarColor: true },
+      orderBy: { startDate: "asc" },
+    }),
+    tasks: await tx.task.findMany({
+      where: { ...mine, dueDate: { gte: parseIsoDate(from), lte: parseIsoDate(to) } },
+      select: { id: true, title: true, status: true, dueDate: true, projectId: true, project: { select: { code: true } } },
+      orderBy: [{ dueDate: "asc" }, { title: "asc" }],
+    }),
+    logged: await tx.timeEntry.groupBy({
+      by: ["entryDate"],
+      where: { userId: uid, entryDate: { gte: parseIsoDate(from), lte: parseIsoDate(to) } },
+      _sum: { minutes: true },
+    }),
+  }));
+  return {
+    view,
+    month,
+    weekStart,
+    minutesByDay: Object.fromEntries(logged.map((r) => [isoDate(r.entryDate), r._sum.minutes ?? 0])) as Record<IsoDate, number>,
+    projects: projects.map(
+      (p): TimelineProject => ({ id: p.id, code: p.code, name: p.name, kind: p.kind, startDate: isoDate(p.startDate), endDate: p.endDate ? isoDate(p.endDate) : to, openEnded: !p.endDate, color: p.calendarColor }),
+    ),
+    tasks: tasks.map((t): TimelineTask => ({ id: t.id, title: t.title, projectId: t.projectId, projectCode: t.project.code, dueDate: isoDate(t.dueDate!), status: t.status })),
+  };
+}
+
+/** DD-5 — your logged minutes per day over the last `weeks` Monday-first weeks, this one included. */
+export async function loadActivityHeatmap(ctx: DashboardContext, weeks: number) {
+  const start = addDays(ctx.weekStart, -7 * (weeks - 1));
+  const rows = await asUser(ctx.user, (tx) =>
+    tx.timeEntry.groupBy({
+      by: ["entryDate"],
+      where: { userId: ctx.user.id, entryDate: { gte: parseIsoDate(start), lte: parseIsoDate(ctx.today) } },
+      _sum: { minutes: true },
     }),
   );
-  const done = tasks
-    .filter((t) => t.status === "done" && t.completedAt)
-    .map((t) => ({ dueDate: t.dueDate ? isoDate(t.dueDate) : null, completedOn: localDay(ctx, t.completedAt!) }))
-    .filter((t) => t.completedOn >= ctx.monthStart && t.completedOn <= ctx.monthEnd);
-  const overdue = tasks.filter((t) => t.status !== "done" && t.dueDate && isoDate(t.dueDate) < ctx.today).length;
-  return { completed: done.length, onTimePct: onTimeRate(done), overdue };
+  const byDay = new Map(rows.map((r) => [isoDate(r.entryDate), r._sum.minutes ?? 0]));
+  return {
+    start,
+    today: ctx.today,
+    weeks: Array.from({ length: weeks }, (_, w) => weekDays(addDays(start, 7 * w)).map((date) => ({ date, minutes: byDay.get(date) ?? 0 }))),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -216,64 +267,8 @@ async function healthRows(ctx: DashboardContext, where: Prisma.ProjectWhereInput
     .sort((a, b) => b.risk - a.risk);
 }
 
-/** PM-2 — active / on-hold projects you run, most at risk first. */
-export function loadMyProjectHealth(ctx: DashboardContext) {
-  return healthRows(ctx, { pmId: ctx.user.id, status: { in: ACTIVE } });
-}
-
-// ---------------------------------------------------------------------------
-// Tasks at risk (PM-3)
-// ---------------------------------------------------------------------------
-
-export type RiskTask = {
-  id: string;
-  title: string;
-  projectId: string;
-  projectCode: string;
-  status: TaskStatus;
-  dueDate: IsoDate | null;
-  owner: string | null;
-  risk: RiskKind;
-};
-
-/** PM-3 — overdue, blocked or ownerless tasks on the projects you run; members to assign from. */
-export async function loadTasksAtRisk(ctx: DashboardContext) {
-  const { tasks, members } = await asUser(ctx.user, async (tx) => {
-    const tasks = await tx.task.findMany({
-      where: {
-        project: { pmId: ctx.user.id, status: { in: ACTIVE } },
-        section: { archivedAt: null },
-        status: { not: "done" },
-        OR: [{ dueDate: { lt: parseIsoDate(ctx.today) } }, { status: "blocked" }, { ownerId: null }],
-      },
-      include: { project: { select: { code: true } }, owner: { select: { fullName: true } } },
-      orderBy: [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }],
-    });
-    const projectIds = [...new Set(tasks.filter((t) => !t.ownerId).map((t) => t.projectId))];
-    const members = projectIds.length
-      ? await tx.projectMember.findMany({
-          where: { projectId: { in: projectIds }, user: { status: "active" } },
-          select: { projectId: true, user: { select: { id: true, fullName: true } } },
-          orderBy: { user: { fullName: "asc" } },
-        })
-      : [];
-    return { tasks, members };
-  });
-  const rows: RiskTask[] = tasks.map((t) => ({
-    id: t.id,
-    title: t.title,
-    projectId: t.projectId,
-    projectCode: t.project.code,
-    status: t.status,
-    dueDate: t.dueDate ? isoDate(t.dueDate) : null,
-    owner: t.owner?.fullName ?? null,
-    risk: taskRisk({ dueDate: t.dueDate ? isoDate(t.dueDate) : null, status: t.status, ownerId: t.ownerId }, ctx.today)!,
-  }));
-  const membersBy: Record<string, { id: string; name: string }[]> = {};
-  for (const m of members) (membersBy[m.projectId] ??= []).push({ id: m.user.id, name: m.user.fullName });
-  const count = (k: RiskKind) => rows.filter((r) => r.risk === k).length;
-  return { rows, counts: { overdue: count("overdue"), blocked: count("blocked"), no_owner: count("no_owner") }, membersBy };
-}
+/** PM-2 — active / on-hold projects you run, most at risk first. Cached per request: the PM strip counts the same rows. */
+export const loadMyProjectHealth = cache((ctx: DashboardContext) => healthRows(ctx, { pmId: ctx.user.id, status: { in: ACTIVE } }));
 
 // ---------------------------------------------------------------------------
 // Payment requests (PM-4, FN-3, FN-4, SL-3)
@@ -317,88 +312,12 @@ async function openRequests(ctx: DashboardContext, invoice: Prisma.InvoiceWhereI
   });
 }
 
-/** PM-4 — pending requests on your projects' invoices that are due within 7 days or late. */
-export async function loadProjectBilling(ctx: DashboardContext) {
-  return (await openRequests(ctx, { project: { pmId: ctx.user.id } })).filter((r) => r.state);
-}
-
 /** FN-3 — due soon and late requests across every project. */
 export async function loadDueAndLate(ctx: DashboardContext) {
   const rows = (await openRequests(ctx)).filter((r) => r.state);
   const late = rows.filter((r) => r.state === "late").sort((a, b) => b.daysLate - a.daysLate);
   const soon = rows.filter((r) => r.state === "due_soon");
   return { late, soon, lateTotals: sumByCurrency(late), soonTotals: sumByCurrency(soon) };
-}
-
-/** FN-4 — what each client still owes, per currency. */
-export async function loadOutstandingByClient(ctx: DashboardContext) {
-  const rows = await openRequests(ctx);
-  const byClient = new Map<string, { id: string; name: string; items: Money[]; late: number }>();
-  for (const r of rows) {
-    const c = byClient.get(r.client.id) ?? { id: r.client.id, name: r.client.name, items: [], late: 0 };
-    c.items.push({ currency: r.currency, amount: r.amount });
-    if (r.state === "late") c.late += 1;
-    byClient.set(r.client.id, c);
-  }
-  // Currencies are never converted (§1.4): rank by the IDR amount, then by the largest other amount.
-  const rank = (m: Money[]) => [m.find((x) => x.currency === "IDR")?.amount ?? 0, Math.max(0, ...m.filter((x) => x.currency !== "IDR").map((x) => x.amount))] as const;
-  return [...byClient.values()]
-    .map((c) => ({ id: c.id, name: c.name, outstanding: sumByCurrency(c.items), late: c.late }))
-    .sort((a, b) => {
-      const [ai, ao] = rank(a.outstanding);
-      const [bi, bo] = rank(b.outstanding);
-      return bi - ai || bo - ao || a.name.localeCompare(b.name);
-    });
-}
-
-// ---------------------------------------------------------------------------
-// HR
-// ---------------------------------------------------------------------------
-
-/**
- * HR-1 — who left a past workday of this week empty. Today doesn't count
- * yet (§2 HR-1: workdays that have passed); the compliance page still shows it.
- */
-export async function loadComplianceSummary(ctx: DashboardContext) {
-  const data = await getCompliance(ctx.user, ctx.today, ctx.today);
-  const rows = data.rows.map((r) => ({ id: r.id, name: r.name, role: r.role, missing: r.days.filter((d) => d.missing && d.date < ctx.today).map((d) => d.date) }));
-  const incomplete = rows.filter((r) => r.missing.length > 0).sort((a, b) => b.missing.length - a.missing.length || a.name.localeCompare(b.name));
-  return { weekStart: data.weekStart, people: rows.length, complete: rows.length - incomplete.length, incomplete };
-}
-
-export type PersonTasks = { id: string; name: string; role: UserRole; open: number; overdue: number; done: number };
-
-/** HR-3 — open, overdue and done-this-month tasks per active person (counts only — see the dashboard migration). */
-export async function loadTasksPerPerson(ctx: DashboardContext): Promise<PersonTasks[]> {
-  const { counts, people } = await asUser(ctx.user, async (tx) => ({
-    counts: await tx.$queryRaw<{ user_id: string; open_tasks: number; overdue_tasks: number; done_this_month: number }[]>`
-      SELECT user_id::text, open_tasks, overdue_tasks, done_this_month
-      FROM app.task_summary_per_person(${ctx.today}::date, ${ctx.monthStart}::date, ${ctx.monthEnd}::date)`,
-    people: await tx.profile.findMany({ where: { status: "active" }, select: { id: true, fullName: true, role: true } }),
-  }));
-  const byId = new Map(counts.map((c) => [c.user_id, c]));
-  return people
-    .filter((p) => byId.has(p.id))
-    .map((p) => {
-      const c = byId.get(p.id)!;
-      return { id: p.id, name: p.fullName, role: p.role, open: c.open_tasks, overdue: c.overdue_tasks, done: c.done_this_month };
-    })
-    .sort((a, b) => b.overdue - a.overdue || b.open - a.open || a.name.localeCompare(b.name));
-}
-
-/** HR-4 — active people by employment type and role; invitations not yet accepted. */
-export async function loadTeamComposition(ctx: DashboardContext) {
-  const { byType, byRole, invited } = await asUser(ctx.user, async (tx) => ({
-    byType: await tx.profile.groupBy({ by: ["employmentType"], where: { status: "active" }, _count: true }),
-    byRole: await tx.profile.groupBy({ by: ["role"], where: { status: "active" }, _count: true }),
-    invited: await tx.profile.findMany({ where: { status: "invited" }, select: { id: true, fullName: true, email: true, role: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
-  }));
-  return {
-    total: byType.reduce((s, r) => s + r._count, 0),
-    byType: byType.map((r) => ({ type: r.employmentType as EmploymentType, count: r._count })).sort((a, b) => b.count - a.count),
-    byRole: byRole.map((r) => ({ role: r.role, count: r._count })).sort((a, b) => b.count - a.count),
-    invited: invited.map((p) => ({ id: p.id, name: p.fullName, email: p.email, role: p.role, invitedAt: p.createdAt })),
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -517,7 +436,7 @@ export async function loadMyInvoices(ctx: DashboardContext): Promise<MyInvoice[]
       orderBy: { issueDate: "desc" },
     }),
   );
-  const order: Record<InvoiceStatus, number> = { overdue: 0, partially_paid: 1, sent: 2, paid: 3, draft: 4, void: 5 };
+  const order: Record<InvoiceStatus, number> = { overdue: 0, payment_submitted: 1, partially_paid: 1, sent: 2, paid: 3, draft: 4, void: 5 };
   return rows
     .map((i) => ({
       id: i.id,
@@ -564,4 +483,345 @@ export async function loadUninvoicedProjects(ctx: DashboardContext) {
     }),
   );
   return rows.map((p) => ({ id: p.id, code: p.code, name: p.name, client: p.client?.name ?? "—", startDate: isoDate(p.startDate), contractType: p.contractType }));
+}
+
+/**
+ * SL-0 — the sales strip and trend: invoiced vs collected per month (last six,
+ * in IDR at indicative rates), what clients still owe, and what isn't billed.
+ * Collected uses the settled IDR when Xendit reported it.
+ */
+export async function loadSalesSummary(ctx: DashboardContext) {
+  const months = Array.from({ length: 6 }, (_, i) => addMonths(ctx.monthStart, i - 5));
+  const from = months[0]!;
+  const { invoices, payments, uninvoiced, drafts } = await asUser(ctx.user, async (tx) => ({
+    invoices: await tx.invoice.findMany({
+      where: { status: { notIn: ["draft", "void"] }, issueDate: { gte: parseIsoDate(from) } },
+      select: { issueDate: true, total: true, currency: true },
+    }),
+    payments: await tx.payment.findMany({
+      where: { paidAt: { gte: since(from) } },
+      select: { paidAt: true, amount: true, currency: true, settlementAmountIdr: true },
+    }),
+    uninvoiced: await tx.project.count({ where: { kind: "client", status: "active", invoices: { none: {} } } }),
+    drafts: await tx.invoice.count({ where: { status: "draft", createdBy: ctx.user.id } }),
+  }));
+  const open = await openRequests(ctx);
+  const rates = await getIdrRates([...invoices, ...payments, ...open].map((r) => r.currency));
+  const toIdr = (items: Money[]) => (rates ? normalizeToIdr(items, rates.toIdr) : items.every((m) => m.currency === "IDR") ? normalizeToIdr(items, {}) : null);
+
+  const trend = months.map((month) => {
+    const billed = invoices.filter((i) => monthStart(isoDate(i.issueDate)) === month).map((i) => ({ currency: i.currency, amount: numOr0(i.total) }));
+    const paid = payments.filter((p) => monthStart(localDay(ctx, p.paidAt)) === month);
+    const settled = paid.reduce((s, p) => s + numOr0(p.settlementAmountIdr), 0);
+    const unsettled = toIdr(paid.filter((p) => p.settlementAmountIdr == null).map((p) => ({ currency: p.currency, amount: numOr0(p.amount) })));
+    return { month, invoiced: toIdr(billed), collected: unsettled === null ? null : Math.round(settled) + unsettled };
+  });
+  const outstanding = sumByCurrency(open);
+  return {
+    trend,
+    current: trend[5]!,
+    previous: trend[4]!,
+    outstanding: {
+      idr: toIdr(outstanding),
+      byCurrency: outstanding,
+      invoices: new Set(open.map((r) => r.invoice.id)).size,
+      late: open.filter((r) => r.state === "late").length,
+    },
+    uninvoiced,
+    drafts,
+    rateDate: rates?.date ?? null,
+  };
+}
+
+/**
+ * DD-0 — your KPIs over the chosen period, against the window before:
+ * shots (tasks you finished on internal projects), client tasks finished and
+ * how many on time, the projects you logged time on, and your hours — total,
+ * billable and per chart bucket.
+ */
+export async function loadWorkSummary(ctx: DashboardContext, period: WorkPeriod) {
+  const uid = ctx.user.id;
+  const { entries, tasks } = await asUser(ctx.user, async (tx) => ({
+    entries: await tx.timeEntry.findMany({
+      where: { userId: uid, entryDate: { gte: parseIsoDate(period.prev.start), lte: parseIsoDate(period.end) } },
+      select: { entryDate: true, minutes: true, isBillable: true, oosStatus: true, projectId: true, project: { select: { kind: true } } },
+    }),
+    tasks: await tx.task
+      .findMany({
+        where: { ownerId: uid, status: "done", completedAt: { gte: since(period.prev.start) } },
+        select: { id: true, dueDate: true, originalDueDate: true, approvedAt: true, completedAt: true, projectId: true, project: { select: { kind: true } } },
+      })
+      .then(async (rows) => ({ rows, timing: await onTimeInputs(tx, rows, ctx.user.timezone, ctx.today) })),
+  }));
+  const inCur = (d: IsoDate) => d >= period.start && d <= period.end;
+  const inPrev = (d: IsoDate) => d >= period.prev.start && d <= period.prev.end;
+  const done = tasks.rows.map((t) => {
+    const on = localDay(ctx, t.completedAt!);
+    const x = tasks.timing.get(t.id)!;
+    return { on, completedOn: x.completedOn ?? on, dueDate: x.dueDate, projectId: t.projectId, internal: t.project.kind === "internal" };
+  });
+  const time = entries.map((e) => ({ on: isoDate(e.entryDate), minutes: e.minutes, billable: isBillableEntry(e), projectId: e.projectId, internal: e.project?.kind === "internal" }));
+
+  const shots = (inWin: (d: IsoDate) => boolean) => done.filter((t) => t.internal && inWin(t.on)).length;
+  const clientDone = done.filter((t) => !t.internal && inCur(t.on));
+  const minutes = (inWin: (d: IsoDate) => boolean) => time.filter((e) => inWin(e.on)).reduce((s, e) => s + e.minutes, 0);
+  const cur = time.filter((e) => inCur(e.on));
+
+  // A project counts when you logged time on it or finished one of its tasks.
+  const projects = new Map<string, boolean>();
+  for (const x of [...cur, ...done.filter((t) => inCur(t.on))]) if (x.projectId) projects.set(x.projectId, x.internal);
+  const prevProjects = new Set([...time.filter((e) => inPrev(e.on)), ...done.filter((t) => inPrev(t.on))].map((x) => x.projectId).filter(Boolean));
+  const internalProjects = [...projects.values()].filter(Boolean).length;
+
+  return {
+    shots: { value: shots(inCur), previous: shots(inPrev) },
+    tasks: { value: clientDone.length, previous: done.filter((t) => !t.internal && inPrev(t.on)).length, onTimePct: onTimeRate(clientDone) },
+    projects: { value: projects.size, previous: prevProjects.size, client: projects.size - internalProjects, internal: internalProjects },
+    hours: { value: minutes(inCur), previous: minutes(inPrev), billable: cur.filter((e) => e.billable).reduce((s, e) => s + e.minutes, 0) },
+    buckets: period.buckets.map((b) => {
+      const rows = time.filter((e) => e.on >= b.start && e.on <= b.end);
+      return { label: b.label, logged: rows.reduce((s, e) => s + e.minutes, 0), billable: rows.filter((e) => e.billable).reduce((s, e) => s + e.minutes, 0) };
+    }),
+  };
+}
+
+/**
+ * PM-0 — the projects you run over the chosen period, against the window
+ * before: the team's hours (and billable share, per chart bucket), tasks
+ * finished and how many on time, out-of-scope hours approved and still
+ * waiting, and what's overdue, blocked or ownerless now.
+ */
+export async function loadPmSummary(ctx: DashboardContext, period: WorkPeriod) {
+  const health = await loadMyProjectHealth(ctx);
+  const ids = health.map((p) => p.id);
+  const { entries, tasks, pendingOos, open } = await asUser(ctx.user, async (tx) => ({
+    entries: await tx.timeEntry.findMany({
+      where: { projectId: { in: ids }, entryDate: { gte: parseIsoDate(period.prev.start), lte: parseIsoDate(period.end) } },
+      select: { entryDate: true, minutes: true, isBillable: true, oosStatus: true },
+    }),
+    tasks: await tx.task
+      .findMany({
+        where: { projectId: { in: ids }, status: "done", completedAt: { gte: since(period.prev.start) }, section: { archivedAt: null } },
+        select: { id: true, dueDate: true, originalDueDate: true, approvedAt: true, completedAt: true },
+      })
+      .then(async (rows) => ({ rows, timing: await onTimeInputs(tx, rows, ctx.user.timezone, ctx.today) })),
+    pendingOos: await tx.timeEntry.aggregate({ where: { projectId: { in: ids }, oosStatus: "pending" }, _sum: { minutes: true } }),
+    open: await tx.task.findMany({
+      where: {
+        projectId: { in: ids },
+        status: { not: "done" },
+        section: { archivedAt: null },
+        OR: [{ dueDate: { lt: parseIsoDate(ctx.today) } }, { status: "blocked" }, { ownerId: null }],
+      },
+      select: { dueDate: true, status: true, ownerId: true },
+    }),
+  }));
+  const inCur = (d: IsoDate) => d >= period.start && d <= period.end;
+  const inPrev = (d: IsoDate) => d >= period.prev.start && d <= period.prev.end;
+  const time = entries.map((e) => ({ on: isoDate(e.entryDate), minutes: e.minutes, billable: isBillableEntry(e), oos: e.oosStatus }));
+  const done = tasks.rows.map((t) => {
+    const on = localDay(ctx, t.completedAt!);
+    const x = tasks.timing.get(t.id)!;
+    return { on, completedOn: x.completedOn ?? on, dueDate: x.dueDate };
+  });
+  const sum = (rows: { minutes: number }[]) => rows.reduce((s, e) => s + e.minutes, 0);
+  const cur = time.filter((e) => inCur(e.on));
+  const curDone = done.filter((t) => inCur(t.on));
+  const risks = open.map((t) => taskRisk({ dueDate: t.dueDate ? isoDate(t.dueDate) : null, status: t.status, ownerId: t.ownerId }, ctx.today));
+  const count = <T,>(rows: T[], f: (r: T) => boolean) => rows.filter(f).length;
+  return {
+    projects: { value: health.length, overBudget: count(health, (p) => p.status === "over_budget"), warning: count(health, (p) => p.status === "warning") },
+    hours: { value: sum(cur), previous: sum(time.filter((e) => inPrev(e.on))), billable: sum(cur.filter((e) => e.billable)) },
+    tasks: { value: curDone.length, previous: count(done, (t) => inPrev(t.on)), onTimePct: onTimeRate(curDone) },
+    oos: {
+      approved: sum(cur.filter((e) => e.oos === "approved")),
+      previous: sum(time.filter((e) => inPrev(e.on) && e.oos === "approved")),
+      pending: pendingOos._sum.minutes ?? 0,
+    },
+    risk: { overdue: count(risks, (r) => r === "overdue"), blocked: count(risks, (r) => r === "blocked"), noOwner: count(risks, (r) => r === "no_owner") },
+    buckets: period.buckets.map((b) => {
+      const rows = time.filter((e) => e.on >= b.start && e.on <= b.end);
+      return { label: b.label, logged: sum(rows), billable: sum(rows.filter((e) => e.billable)) };
+    }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// PM dashboard: your projects' standing and calendar, the people on them
+// ---------------------------------------------------------------------------
+
+export type PmProject = {
+  id: string;
+  code: string;
+  name: string;
+  client: string;
+  status: "active" | "on_hold";
+  startDate: IsoDate;
+  endDate: IsoDate | null;
+  color: HrEventColor | null;
+  standing: ProjectStanding;
+  reasons: string[];
+  openTasks: number;
+};
+
+/**
+ * Active / on-hold projects you run with where each stands (delayed, at risk,
+ * on track — `projectStanding`), most serious first. Cached per request: the
+ * calendar and the status list read the same rows.
+ */
+export const loadPmProjects = cache(async (ctx: DashboardContext): Promise<PmProject[]> => {
+  const health = new Map((await loadMyProjectHealth(ctx)).map((h) => [h.id, h]));
+  const { projects, open } = await asUser(ctx.user, async (tx) => {
+    const projects = await tx.project.findMany({
+      where: { pmId: ctx.user.id, status: { in: ACTIVE } },
+      select: { id: true, code: true, name: true, status: true, startDate: true, endDate: true, calendarColor: true, client: { select: { name: true } } },
+    });
+    const open = await tx.task.groupBy({
+      by: ["projectId", "status"],
+      where: { projectId: { in: projects.map((p) => p.id) }, status: { not: "done" }, section: { archivedAt: null } },
+      _count: true,
+    });
+    return { projects, open };
+  });
+  const order = (s: ProjectStanding) => PROJECT_STANDINGS.indexOf(s);
+  return projects
+    .map((p) => {
+      const tasks = open.filter((o) => o.projectId === p.id);
+      const openTasks = tasks.reduce((n, o) => n + o._count, 0);
+      const h = health.get(p.id);
+      const endDate = p.endDate ? isoDate(p.endDate) : null;
+      const status = p.status as "active" | "on_hold";
+      const { standing, reasons } = projectStanding(
+        { status, endDate, health: h?.status ?? "no_budget", overdueTasks: h?.overdueTasks ?? 0, blockedTasks: tasks.find((o) => o.status === "blocked")?._count ?? 0, openTasks },
+        ctx.today,
+      );
+      return { id: p.id, code: p.code, name: p.name, client: p.client?.name ?? "Internal", status, startDate: isoDate(p.startDate), endDate, color: p.calendarColor, standing, reasons, openTasks };
+    })
+    .sort((a, b) => order(a.standing) - order(b.standing) || b.reasons.length - a.reasons.length || (a.endDate ?? "9999").localeCompare(b.endDate ?? "9999") || a.code.localeCompare(b.code));
+});
+
+export type PmMemberProject = {
+  id: string;
+  code: string;
+  name: string;
+  billable: boolean;
+  pm: string;
+  /** You run it — its tasks and time are yours to see. */
+  mine: boolean;
+  todayMinutes: number;
+  openTasks: number;
+  overdueTasks: number;
+  nextDue: IsoDate | null;
+};
+
+export type PmMemberRow = {
+  id: string;
+  name: string;
+  role: UserRole;
+  avatarUrl: string | null;
+  away: LeaveKind | null;
+  todayMinutes: number;
+  weekMinutes: number;
+  weekBillableMinutes: number;
+  capacityHours: number;
+  /** Billable hours this week against capacity, in percent. */
+  utilization: number | null;
+  /** Projects they're on today (started, not completed or archived), yours first. */
+  projects: PmMemberProject[];
+};
+
+/**
+ * Everyone on the projects you run (you aside): who's away, the hours they
+ * logged today and this week, billable utilization, and every running project
+ * they're on today. Time and tasks come back under RLS, so they cover the
+ * projects you're a member of; the summary counts the same rows.
+ */
+export async function loadPmTeam(ctx: DashboardContext) {
+  const me = ctx.user.id;
+  const [settings, data] = await Promise.all([
+    getSettings(),
+    asUser(ctx.user, async (tx) => {
+      const members = await tx.projectMember.findMany({
+        where: { project: { pmId: me, status: { in: ACTIVE } }, userId: { not: me }, user: { status: "active" } },
+        select: { user: { select: { id: true, fullName: true, role: true, avatarUrl: true } } },
+      });
+      const people = [...new Map(members.map((m) => [m.user.id, m.user])).values()].sort((a, b) => a.fullName.localeCompare(b.fullName));
+      const ids = people.map((p) => p.id);
+      const week = { gte: parseIsoDate(ctx.weekStart), lte: parseIsoDate(ctx.weekEnd) };
+      return {
+        people,
+        memberships: await tx.projectMember.findMany({
+          where: { userId: { in: ids }, project: { status: { in: ACTIVE }, startDate: { lte: parseIsoDate(ctx.today) } } },
+          select: { userId: true, project: { select: { id: true, code: true, name: true, kind: true, pmId: true, pm: { select: { fullName: true } } } } },
+        }),
+        entries: await tx.timeEntry.findMany({ where: { userId: { in: ids }, entryDate: week }, select: { userId: true, projectId: true, entryDate: true, minutes: true, isBillable: true, oosStatus: true } }),
+        tasks: await tx.task.findMany({
+          where: { ownerId: { in: ids }, status: { not: "done" }, section: { archivedAt: null }, project: { status: { in: ACTIVE } } },
+          select: { ownerId: true, projectId: true, dueDate: true },
+        }),
+        cap: await capacityInputs(tx, ids, ctx.weekEnd, ctx.weekStart),
+        holidays: await holidaySet(tx, ctx.weekStart, ctx.weekEnd),
+      };
+    }),
+  ]);
+  const sum = (rows: { minutes: number }[]) => rows.reduce((n, e) => n + e.minutes, 0);
+  const rows: PmMemberRow[] = data.people.map((p) => {
+    const entries = data.entries.filter((e) => e.userId === p.id);
+    const today = entries.filter((e) => isoDate(e.entryDate) === ctx.today);
+    const tasks = data.tasks.filter((t) => t.ownerId === p.id);
+    const overrides = data.cap.overridesOf(p.id);
+    const leave = overrides.filter((o) => o.kind).map((o) => ({ kind: o.kind!, start: o.start, end: o.end }));
+    const capacityHours = capacityHours_(data.cap.capacityOf(p.id), overrides, { start: ctx.weekStart, end: ctx.weekEnd }, settings.workdays, data.holidays);
+    const weekBillableMinutes = billableMinutesOf(entries);
+    const projects = data.memberships
+      .filter((m) => m.userId === p.id)
+      .map(({ project: pr }): PmMemberProject => {
+        const own = tasks.filter((t) => t.projectId === pr.id);
+        const due = own.map((t) => (t.dueDate ? isoDate(t.dueDate) : null)).filter((d): d is IsoDate => d !== null).sort();
+        return {
+          id: pr.id,
+          code: pr.code,
+          name: pr.name,
+          billable: pr.kind === "client",
+          pm: pr.pm.fullName,
+          mine: pr.pmId === me,
+          todayMinutes: sum(today.filter((e) => e.projectId === pr.id)),
+          openTasks: own.length,
+          overdueTasks: due.filter((d) => d < ctx.today).length,
+          nextDue: due.find((d) => d >= ctx.today) ?? null,
+        };
+      })
+      .sort((a, b) => Number(b.mine) - Number(a.mine) || b.todayMinutes - a.todayMinutes || a.code.localeCompare(b.code));
+    return {
+      id: p.id,
+      name: p.fullName,
+      role: p.role,
+      avatarUrl: p.avatarUrl,
+      away: leave.find((l) => l.start <= ctx.today && l.end >= ctx.today)?.kind ?? null,
+      todayMinutes: sum(today),
+      weekMinutes: sum(entries),
+      weekBillableMinutes,
+      capacityHours,
+      utilization: utilizationPct(weekBillableMinutes, capacityHours),
+      projects,
+    };
+  });
+  const present = rows.filter((r) => !r.away);
+  const capacityHours = rows.reduce((n, r) => n + r.capacityHours, 0);
+  const billableMinutes = rows.reduce((n, r) => n + r.weekBillableMinutes, 0);
+  return {
+    rows,
+    summary: {
+      people: rows.length,
+      onBillable: present.filter((r) => r.projects.some((pr) => pr.billable)).length,
+      present: present.length,
+      away: rows.length - present.length,
+      loggedToday: rows.filter((r) => r.todayMinutes > 0).length,
+      todayMinutes: rows.reduce((n, r) => n + r.todayMinutes, 0),
+      billableMinutes,
+      capacityHours: Math.round(capacityHours * 10) / 10,
+      utilization: utilizationPct(billableMinutes, capacityHours),
+      overdueTasks: rows.reduce((n, r) => n + r.projects.reduce((m, pr) => m + pr.overdueTasks, 0), 0),
+    },
+  };
 }

@@ -44,7 +44,7 @@ export async function loadFinanceOverview(user: CurrentUser) {
       select: { paidAt: true, settlementAmountIdr: true },
     }),
     requests: await tx.invoicePaymentRequest.findMany({
-      where: { status: "pending", invoice: { status: { in: ["draft", "sent", "partially_paid", "overdue"] } } },
+      where: { status: "pending", invoice: { status: { in: ["draft", "sent", "partially_paid", "payment_submitted", "overdue"] } } },
       select: {
         id: true,
         label: true,

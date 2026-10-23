@@ -72,7 +72,8 @@ export function NotificationBell({ initialInbox }: { initialInbox: Inbox }) {
       <PopoverTrigger asChild>
         <Button variant="tertiary" size="icon" className="relative size-8 shrink-0" aria-label={label}>
           <Icon name="notification" size={14} />
-          {inbox.unreadCount > 0 && <span className="bg-brand absolute top-1.5 right-1.5 size-1.5 rounded-full" />}
+          {/* Button wraps children in an icon-sized relative span: offsets are from the icon, not the button. */}
+          {inbox.unreadCount > 0 && <span aria-hidden className="bg-brand absolute -top-0.5 -right-0.5 size-1.5 rounded-full" />}
         </Button>
       </PopoverTrigger>
       <PopoverContent

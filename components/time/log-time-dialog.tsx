@@ -170,7 +170,7 @@ function EntryForm({ options, mode, initial, onDone }: { options: LogTimeOptions
                 isDayDisabled={(d) => (correcting ? !locked.has(weekStart(d)) : locked.has(weekStart(d))) || d > options.today}
               />
             </FormField>
-            <FormField label="Duration" htmlFor="lt-duration" required hint={minutes ? formatDuration(minutes) : "1h 30m · 1.5 · 90m"}>
+            <FormField label="Duration" htmlFor="lt-duration" required>
               <Input
                 id="lt-duration"
                 autoFocus
@@ -183,7 +183,7 @@ function EntryForm({ options, mode, initial, onDone }: { options: LogTimeOptions
             </FormField>
           </div>
 
-          <div className="bg-accent inline-flex w-fit gap-1 rounded-lg p-1" role="radiogroup" aria-label="Log to">
+          <div className="bg-accent flex w-full gap-1 rounded-lg p-1" role="radiogroup" aria-label="Log to">
             {(["task", "category"] as const).map((t) => (
               <button
                 key={t}
@@ -192,7 +192,7 @@ function EntryForm({ options, mode, initial, onDone }: { options: LogTimeOptions
                 aria-checked={target === t}
                 onClick={() => setTarget(t)}
                 className={cn(
-                  "rounded-md px-3 py-1 text-body transition-colors",
+                  "flex-1 rounded-md px-3 py-1 text-body transition-colors",
                   target === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -206,7 +206,7 @@ function EntryForm({ options, mode, initial, onDone }: { options: LogTimeOptions
               <TaskCombobox tasks={options.tasks} value={taskId} fallbackLabel={initial?.taskId && !task ? "Current task" : undefined} onChange={setTaskId} />
             </FormField>
           ) : (
-            <FormField label="Category" htmlFor="lt-category" required hint="Category time has no project and is never billable.">
+            <FormField label="Category" htmlFor="lt-category" required>
               <SelectField
                 id="lt-category"
                 value={categoryId}

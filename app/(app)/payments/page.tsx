@@ -1,18 +1,24 @@
 import { requireAccess, asUser } from "@/lib/auth";
-import { perms } from "@/lib/roles";
+import { hasModule, perms } from "@/lib/roles";
+import { PLATFORM_LABELS } from "@/lib/invoices/pure";
+import { isoDate, todayIn } from "@/lib/time/pure";
 import { numOr0, num } from "@/lib/money";
 import { formatDate, formatMoney } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { EntityTabs } from "@/components/entity-tabs";
 import { PaymentsTable, type PaymentRow } from "./payments-table";
+import { ProofsTable, type ProofRow } from "./proofs-table";
 
 export const metadata = { title: "Payments" };
 
-/** Every Xendit payment (Finance, Sales, C-Level) and the unmatched queue (M5.7). */
+/**
+ * Every payment (Finance, Sales, C-Level), the unmatched Xendit queue (M5.7)
+ * and, Phase 2 · M9, payment proofs from Sales waiting for Finance.
+ */
 export default async function PaymentsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const user = await requireAccess(perms.viewPayments);
   const { tab } = await searchParams;
-  const [payments, openRequests] = await asUser(user, (tx) =>
+  const [payments, openRequests, proofs] = await asUser(user, (tx) =>
     Promise.all([
       tx.payment.findMany({
         orderBy: { paidAt: "desc" },
@@ -30,8 +36,31 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
             orderBy: { dueDate: "asc" },
           })
         : Promise.resolve([]),
+      tx.paymentProof.findMany({
+        where: { status: "submitted" },
+        orderBy: { submittedAt: "asc" },
+        include: {
+          invoice: { select: { id: true, number: true, billToName: true } },
+          request: { select: { label: true } },
+          submitter: { select: { fullName: true } },
+        },
+      }),
     ]),
   );
+  const proofRows: ProofRow[] = proofs.map((p) => ({
+    id: p.id,
+    amount: numOr0(p.amount),
+    currency: p.currency,
+    fxRate: num(p.fxRateToIdr),
+    paidOn: isoDate(p.paidOn),
+    platform: PLATFORM_LABELS[p.platform],
+    invoice: { id: p.invoice.id, number: p.invoice.number, client: p.invoice.billToName },
+    request: p.request?.label ?? null,
+    submittedBy: p.submitter?.fullName ?? null,
+    submittedOn: todayIn(user.timezone, p.submittedAt),
+    hasFile: Boolean(p.filePath),
+    own: p.submittedBy === user.id,
+  }));
   const unmatched = payments.filter((p) => !p.invoiceId);
   const review = payments.filter((p) => p.needsReview);
   const options = openRequests.map((r) => ({
@@ -46,7 +75,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
     paidAt: p.paidAt.toISOString(),
     invoice: p.invoice ? { id: p.invoice.id, number: p.invoice.number, billToName: p.invoice.billToName } : null,
     request: p.paymentRequest?.label ?? null,
-    externalRef: (p.raw as { external_id?: string })?.external_id ?? p.externalId,
+    externalRef: p.source === "proof" ? "payment proof" : ((p.raw as { external_id?: string })?.external_id ?? p.externalId),
     channel: p.channel ?? "Xendit",
     settledIdr: p.currency !== "IDR" ? num(p.settlementAmountIdr) : null,
     matchedBy: p.matcher?.fullName ?? null,
@@ -67,15 +96,16 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
       <PageHeader title="Payments" compact />
       <EntityTabs
         variant="toolbar"
-        initial={tab ?? (unmatched.length ? "unmatched" : "all")}
+        initial={tab ?? (proofRows.length ? "verify" : unmatched.length ? "unmatched" : "all")}
         items={[
+          { value: "verify", label: "To verify", count: proofRows.length, content: <ProofsTable rows={proofRows} canDecide={hasModule(user, "finance")} /> },
           { value: "unmatched", label: "Unmatched", count: unmatched.length, content: list(unmatched, true) },
           { value: "review", label: "Needs review", count: review.length || undefined, content: list(review, false) },
           { value: "all", label: "All payments", count: payments.length, content: list(payments, false) },
         ]}
       />
       <p className="text-muted-foreground mt-4 text-caption">
-        Recorded automatically from Xendit webhooks — there&apos;s no manual entry in Phase 1. Showing the latest 300. Due dates use{" "}
+        Xendit payments are recorded from its webhooks; others come from a payment proof Finance verified. Showing the latest 300. Due dates use{" "}
         {formatDate(new Date())} as today.
       </p>
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   Table,
@@ -40,6 +40,15 @@ type Props<T> = {
   emptyClassName?: string;
   /** "fixed" gives every column the same width, as in the Clients design. */
   layout?: "auto" | "fixed";
+  /**
+   * Detail under a row, opened from a chevron at the start of the first
+   * column (e.g. what a person worked on today). Rows `isRowExpandable`
+   * rejects get an empty slot, so the first column still lines up.
+   */
+  renderExpanded?: (row: T) => ReactNode;
+  isRowExpandable?: (row: T) => boolean;
+  /** The chevron's accessible name, e.g. "Show Ana's day". */
+  expandLabel?: (row: T) => string;
   className?: string;
 };
 
@@ -64,11 +73,22 @@ export function DataTable<T>({
   emptyDescription,
   emptyClassName,
   layout = "auto",
+  renderExpanded,
+  isRowExpandable,
+  expandLabel,
   className,
 }: Props<T>) {
   const router = useRouter();
   const [sort, setSort] = useState<{ id: string; dir: "asc" | "desc" } | null>(null);
   const [page, setPage] = useState(0);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const toggleExpanded = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const sorted = useMemo(() => {
     if (!sort) return rows;
@@ -150,27 +170,60 @@ export function DataTable<T>({
             {visible.map((row) => {
               const href = getRowHref?.(row);
               const inactive = isRowInactive?.(row) ?? false;
+              const id = getRowId(row);
+              const canExpand = Boolean(renderExpanded) && (isRowExpandable?.(row) ?? true);
+              const open = canExpand && expanded.has(id);
               return (
-                <TableRow
-                  key={getRowId(row)}
-                  className={cn("border-border hover:bg-hover transition-colors duration-80", href && "cursor-pointer")}
-                  onClick={href ? () => router.push(href) : undefined}
-                >
-                  {columns.map((col) => (
-                    <TableCell
-                      key={col.id}
-                      className={cn(
-                        "h-9 py-0",
-                        inactive ? "text-muted-foreground" : "text-foreground",
-                        col.align === "right" && "tabular text-right",
-                        col.primary && "[font-variation-settings:'wght'_500,'opsz'_14]!",
-                        col.className,
-                      )}
-                    >
-                      {col.cell(row)}
-                    </TableCell>
-                  ))}
-                </TableRow>
+                <Fragment key={id}>
+                  <TableRow
+                    className={cn("border-border hover:bg-hover transition-colors duration-80", href && "cursor-pointer")}
+                    onClick={href ? () => router.push(href) : undefined}
+                  >
+                    {columns.map((col, index) => (
+                      <TableCell
+                        key={col.id}
+                        className={cn(
+                          "h-9 py-0",
+                          inactive ? "text-muted-foreground" : "text-foreground",
+                          col.align === "right" && "tabular text-right",
+                          col.primary && "[font-variation-settings:'wght'_500,'opsz'_14]!",
+                          col.className,
+                        )}
+                      >
+                        {renderExpanded && index === 0 ? (
+                          <span className="flex min-w-0 items-center gap-1">
+                            {canExpand ? (
+                              <button
+                                type="button"
+                                aria-expanded={open}
+                                aria-label={expandLabel?.(row) ?? "Show details"}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleExpanded(id);
+                                }}
+                                className="text-muted-foreground hover:text-foreground -ml-1 grid size-6 shrink-0 place-items-center rounded-md outline-none transition-colors duration-80 focus-visible:ring-1 focus-visible:ring-[color:var(--focus-ring)]"
+                              >
+                                <Icon name="chevronRight" size={14} className={cn("transition-transform duration-160", open && "rotate-90")} />
+                              </button>
+                            ) : (
+                              <span className="-ml-1 size-6 shrink-0" aria-hidden />
+                            )}
+                            {col.cell(row)}
+                          </span>
+                        ) : (
+                          col.cell(row)
+                        )}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                  {open && (
+                    <TableRow className="border-border hover:bg-transparent">
+                      <TableCell colSpan={columns.length} className="whitespace-normal! p-0!">
+                        {renderExpanded!(row)}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
               );
             })}
           </TableBody>

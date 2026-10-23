@@ -7,12 +7,23 @@ import { asUser, requireUser, type CurrentUser } from "@/lib/auth";
 import { run, fail, parseOrFail, type ActionResult } from "@/lib/actions";
 import type { Tx } from "@/lib/db";
 import { logActivity } from "@/lib/audit";
-import { notifyMany } from "@/lib/notify";
-import { parseIsoDate } from "@/lib/time/pure";
+import { notify, notifyMany } from "@/lib/notify";
+import { prisma } from "@/lib/prisma";
+import { formatDate } from "@/lib/format";
+import { isoDate, parseIsoDate } from "@/lib/time/pure";
 import { getTaskDetail, type TaskDetail } from "@/lib/tasks/queries";
 import { validateTaskContent } from "@/lib/tasks/content";
 import { findMentions } from "@/lib/tasks/mentions";
-import { commentSchema, sectionSchema, taskPatchSchema, taskSchema, TASK_STATUSES, uuid } from "@/lib/validation";
+import {
+  commentSchema,
+  dueChangeDecisionSchema,
+  reviewDecisionSchema,
+  sectionSchema,
+  taskPatchSchema,
+  taskSchema,
+  TASK_STATUSES,
+  uuid,
+} from "@/lib/validation";
 
 const taskPath = (projectId: string, taskId: string) => `/projects/${projectId}?task=${taskId}`;
 
@@ -40,14 +51,49 @@ async function notifyAssigned(user: CurrentUser, task: { id: string; title: stri
   );
 }
 
+/**
+ * Phase 2 review flow notifications: into review → the reviewer; out of
+ * review → the owner hears the decision. The database already decided who
+ * may move it (tasks_review_flow).
+ */
+async function notifyReview(user: CurrentUser, taskId: string, from: TaskStatus, to: TaskStatus) {
+  if (from === to || (to !== "review" && from !== "review")) return;
+  const t = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { id: true, title: true, projectId: true, ownerId: true, reviewerId: true, project: { select: { code: true } } },
+  });
+  if (!t) return;
+  const path = taskPath(t.projectId, t.id);
+  if (to === "review" && t.reviewerId && t.reviewerId !== user.id) {
+    await notify(t.reviewerId, "review_requested", { title: `“${t.title}” is ready for your review`, body: `${t.project.code} · sent by ${user.fullName} · review within 1 working day`, path, refId: t.id });
+  } else if (from === "review" && t.ownerId && t.ownerId !== user.id && (to === "done" || to === "in_progress" || to === "todo")) {
+    await notify(t.ownerId, "review_decided", {
+      title: to === "done" ? `“${t.title}” was approved` : `Changes requested on “${t.title}”`,
+      body: `${t.project.code} · by ${user.fullName}`,
+      path,
+      refId: t.id,
+    });
+  }
+}
+
 /** M2.2 — any member may create a task. */
 export async function createTask(projectId: unknown, raw: unknown): Promise<ActionResult<{ id: string }>> {
   return run(async () => {
     const user = await requireUser();
     const pid = parseOrFail(uuid, projectId);
     const d = parseOrFail(taskSchema, raw);
+    // PRD Phase 2: a task from the full form has a due date, a reviewer and an
+    // estimate. A quick add (title only) is allowed and shows as incomplete.
+    const full = Boolean(d.dueDate || d.reviewerId || d.estimateHours !== null || d.typeId);
+    if (full) {
+      if (!d.dueDate) fail("Set a due date.");
+      if (!d.reviewerId) fail("Pick a reviewer.");
+      if (d.estimateHours === null) fail("Add an estimate of at least 1 hour.");
+    }
+    if (d.status === "done") fail("Tasks are approved by their reviewer — create it in another column.");
     const task = await asUser(user, async (tx) => {
       const last = await tx.task.aggregate({ where: { sectionId: d.sectionId }, _max: { position: true } });
+      const typeId = d.typeId ?? (await tx.taskType.findUnique({ where: { key: "regular" }, select: { id: true } }))?.id ?? null;
       const t = await tx.task.create({
         data: {
           projectId: pid,
@@ -55,14 +101,19 @@ export async function createTask(projectId: unknown, raw: unknown): Promise<Acti
           title: d.title,
           ownerId: d.ownerId ?? null,
           priority: d.priority,
-          status: d.status,
+          // Review opens a round on the update below.
+          status: d.status === "review" ? "in_progress" : d.status,
           dueDate: d.dueDate ? parseIsoDate(d.dueDate) : null,
           estimateHours: d.estimateHours,
+          typeId,
+          reviewerId: d.reviewerId ?? null,
+          deliverableUrl: d.deliverableUrl ?? null,
           position: (last._max.position ?? 0) + 1024,
           createdBy: user.id,
         },
         include: { project: { select: { code: true } } },
       });
+      if (d.status === "review") await tx.task.update({ where: { id: t.id }, data: { status: "review" } });
       const collaborators = d.collaboratorIds.filter((id) => id !== d.ownerId);
       if (collaborators.length) await tx.taskCollaborator.createMany({ data: collaborators.map((userId) => ({ taskId: t.id, userId })) });
       await activity(tx, user, t.id, "created");
@@ -71,6 +122,7 @@ export async function createTask(projectId: unknown, raw: unknown): Promise<Acti
     const info = { id: task.id, title: task.title, projectId: pid, code: task.project.code };
     if (task.ownerId) await notifyAssigned(user, info, [task.ownerId], "owner");
     await notifyAssigned(user, info, task.collaborators, "collaborator");
+    if (d.status === "review") await notifyReview(user, task.id, "in_progress", "review");
     revalidateTasks(pid);
     return { id: task.id };
   });
@@ -80,11 +132,12 @@ export async function createTask(projectId: unknown, raw: unknown): Promise<Acti
  * M2.2 / M2.7 — owner, collaborators, the project's PM and C-Level change a
  * task. Every meaningful change lands in the task's activity history.
  */
-export async function updateTask(taskId: unknown, raw: unknown): Promise<ActionResult> {
+export async function updateTask(taskId: unknown, raw: unknown): Promise<ActionResult<{ dueRequested: boolean }>> {
   return run(async () => {
     const user = await requireUser();
     const id = parseOrFail(uuid, taskId);
     const patch = parseOrFail(taskPatchSchema, raw);
+    const asked = { dueDate: patch.dueDate, reason: patch.dueReason };
 
     const result = await asUser(user, async (tx) => {
       const before = await tx.task.findUnique({
@@ -92,6 +145,21 @@ export async function updateTask(taskId: unknown, raw: unknown): Promise<ActionR
         include: { collaborators: { select: { userId: true } }, project: { select: { code: true, pmId: true } } },
       });
       if (!before) fail("This task no longer exists.");
+
+      // A due date that's already set moves only with a reason; the PM's own
+      // change is approved at once, anyone else's waits for the PM.
+      const beforeDue = before.dueDate ? isoDate(before.dueDate) : null;
+      let dueRequested = false;
+      if (patch.dueDate !== undefined && beforeDue && patch.dueDate !== beforeDue) {
+        if (!patch.dueDate) fail("A due date can't be removed once set.");
+        if (!patch.dueReason) fail("Give a reason for the new due date.");
+        const change = await tx.dueDateChange.create({ data: { taskId: id, toDate: parseIsoDate(patch.dueDate), reason: patch.dueReason } });
+        await activity(tx, user, id, "due_change_requested", { from: beforeDue, to: patch.dueDate, reason: patch.dueReason, approved: Boolean(change.approvedAt) });
+        if (!change.approvedAt) {
+          dueRequested = true;
+          patch.dueDate = undefined;
+        }
+      }
 
       const data: Prisma.TaskUncheckedUpdateInput = {};
       if (patch.title !== undefined) data.title = patch.title;
@@ -101,18 +169,22 @@ export async function updateTask(taskId: unknown, raw: unknown): Promise<ActionR
       if (patch.status !== undefined) data.status = patch.status;
       if (patch.dueDate !== undefined) data.dueDate = patch.dueDate ? parseIsoDate(patch.dueDate) : null;
       if (patch.estimateHours !== undefined) data.estimateHours = patch.estimateHours;
+      if (patch.typeId !== undefined) data.typeId = patch.typeId;
+      if (patch.reviewerId !== undefined) data.reviewerId = patch.reviewerId;
+      if (patch.deliverableUrl !== undefined) data.deliverableUrl = patch.deliverableUrl;
 
       if (Object.keys(data).length) {
         const res = await tx.task.updateMany({ where: { id }, data });
         if (res.count === 0) fail("Only the owner, collaborators, the project's PM or C-Level can change this task.");
       }
 
-      const beforeDue = before.dueDate ? before.dueDate.toISOString().slice(0, 10) : null;
       if (patch.status !== undefined && patch.status !== before.status) await activity(tx, user, id, "status_changed", { from: before.status, to: patch.status });
       if (patch.ownerId !== undefined && patch.ownerId !== before.ownerId) await activity(tx, user, id, "owner_changed", { from: before.ownerId, to: patch.ownerId });
       if (patch.dueDate !== undefined && patch.dueDate !== beforeDue) await activity(tx, user, id, "due_date_changed", { from: beforeDue, to: patch.dueDate });
       if (patch.priority !== undefined && patch.priority !== before.priority) await activity(tx, user, id, "priority_changed", { from: before.priority, to: patch.priority });
       if (patch.title !== undefined && patch.title !== before.title) await activity(tx, user, id, "renamed", { from: before.title, to: patch.title });
+      if (patch.reviewerId !== undefined && patch.reviewerId !== before.reviewerId) await activity(tx, user, id, "reviewer_changed", { from: before.reviewerId, to: patch.reviewerId });
+      if (patch.typeId !== undefined && patch.typeId !== before.typeId) await activity(tx, user, id, "type_changed", { from: before.typeId, to: patch.typeId });
 
       let addedCollaborators: string[] = [];
       if (patch.collaboratorIds !== undefined) {
@@ -124,7 +196,7 @@ export async function updateTask(taskId: unknown, raw: unknown): Promise<ActionR
         if (addedCollaborators.length) await tx.taskCollaborator.createMany({ data: addedCollaborators.map((userId) => ({ taskId: id, userId })) });
         if (addedCollaborators.length || removed.length) await activity(tx, user, id, "collaborators_changed", { added: addedCollaborators, removed });
       }
-      return { before, addedCollaborators };
+      return { before, addedCollaborators, dueRequested };
     });
 
     const { before } = result;
@@ -140,7 +212,20 @@ export async function updateTask(taskId: unknown, raw: unknown): Promise<ActionR
         refId: id,
       }, user.id);
     }
+    if (patch.status !== undefined) await notifyReview(user, id, before.status, patch.status);
+    if (patch.reviewerId && patch.reviewerId !== before.reviewerId && before.status === "review" && patch.reviewerId !== user.id) {
+      await notify(patch.reviewerId, "review_requested", { title: `“${info.title}” is ready for your review`, body: `${info.code} · handed over by ${user.fullName}`, path: taskPath(before.projectId, id), refId: id });
+    }
+    if (result.dueRequested) {
+      await notify(before.project.pmId, "due_change_requested", {
+        title: `${user.fullName} asks to move “${info.title}” to ${asked.dueDate ? formatDate(asked.dueDate) : "a new date"}`,
+        body: `${info.code} · ${asked.reason ?? ""}`,
+        path: taskPath(before.projectId, id),
+        refId: id,
+      });
+    }
     revalidateTasks(before.projectId);
+    return { dueRequested: result.dueRequested };
   });
 }
 
@@ -164,6 +249,7 @@ export async function moveTask(
       }),
       target,
     );
+    let moved: TaskStatus | null = null;
     const projectId = await asUser(user, async (tx) => {
       const task = await tx.task.findUnique({ where: { id }, select: { projectId: true, status: true } });
       if (!task) fail("This task no longer exists.");
@@ -182,8 +268,12 @@ export async function moveTask(
       const res = await tx.task.updateMany({ where: { id }, data });
       if (res.count === 0) fail("You can't move this task.");
       if (t.status && t.status !== task.status) await activity(tx, user, id, "status_changed", { from: task.status, to: t.status });
-      return task.projectId;
+      return { projectId: task.projectId, from: task.status };
+    }).then((r) => {
+      moved = r.from;
+      return r.projectId;
     });
+    if (t.status && moved) await notifyReview(user, id, moved, t.status);
     if (t.status === "blocked") {
       const p = await asUser(user, (tx) => tx.task.findUnique({ where: { id }, select: { title: true, project: { select: { pmId: true, code: true } } } }));
       if (p) await notifyMany([p.project.pmId], "task_blocked", { title: `“${p.title}” is blocked`, body: `${p.project.code} · marked by ${user.fullName}`, path: taskPath(projectId, id), refId: id }, user.id);
@@ -363,5 +453,71 @@ export async function archiveSection(sectionId: unknown): Promise<ActionResult> 
       return s.projectId;
     });
     revalidateTasks(projectId);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — review decisions and due date requests
+// ---------------------------------------------------------------------------
+
+/**
+ * The reviewer approves (→ Approved) or asks for changes (→ In progress).
+ * tasks_review_flow refuses anyone but the reviewer, the project's PM or
+ * C-Level, and closes the round; the note is then stored on that round.
+ */
+export async function reviewTask(taskId: unknown, raw: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const user = await requireUser();
+    const id = parseOrFail(uuid, taskId);
+    const d = parseOrFail(reviewDecisionSchema, raw);
+    if (d.decision === "changes" && !d.note) fail("Say what needs to change.");
+    const to: TaskStatus = d.decision === "approve" ? "done" : "in_progress";
+    const before = await asUser(user, async (tx) => {
+      const t = await tx.task.findUnique({ where: { id }, select: { projectId: true, status: true, deliverableUrl: true, type: { select: { key: true } } } });
+      if (!t) fail("This task no longer exists.");
+      if (t.status !== "review") fail("This task isn't waiting for review.");
+      const res = await tx.task.updateMany({ where: { id }, data: { status: to } });
+      if (res.count === 0) fail("Only the reviewer can decide this review.");
+      await activity(tx, user, id, "review_decided", { decision: d.decision, note: d.note ?? null });
+      return t;
+    });
+    if (d.note) {
+      const round = await prisma.reviewRound.findFirst({ where: { taskId: id, decidedBy: user.id }, orderBy: { decidedAt: "desc" }, select: { id: true } });
+      if (round) await prisma.reviewRound.update({ where: { id: round.id }, data: { note: d.note } });
+    }
+    await logActivity({ actorId: user.id, entityType: "task", entityId: id, action: d.decision === "approve" ? "approved" : "changes_requested" });
+    await notifyReview(user, id, "review", to);
+    revalidateTasks(before.projectId);
+  });
+}
+
+/** The project's PM approves or turns down a due date request; approval moves the date in the same transaction. */
+export async function decideDueChange(changeId: unknown, raw: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const user = await requireUser();
+    const id = parseOrFail(uuid, changeId);
+    const d = parseOrFail(dueChangeDecisionSchema, raw);
+    const change = await asUser(user, async (tx) => {
+      const c = await tx.dueDateChange.findUnique({ where: { id }, include: { task: { select: { id: true, title: true, projectId: true, project: { select: { code: true } } } } } });
+      if (!c) fail("This request no longer exists.");
+      if (d.approve) {
+        await tx.dueDateChange.update({ where: { id }, data: { approvedBy: user.id } });
+        await tx.task.update({ where: { id: c.taskId }, data: { dueDate: c.toDate } });
+      } else {
+        await tx.dueDateChange.update({ where: { id }, data: { rejectedBy: user.id } });
+      }
+      await activity(tx, user, c.taskId, "due_change_decided", { to: isoDate(c.toDate), approved: d.approve, note: d.note ?? null });
+      return c;
+    });
+    await logActivity({ actorId: user.id, entityType: "due_date_change", entityId: id, action: d.approve ? "approved" : "rejected" });
+    if (change.requestedBy && change.requestedBy !== user.id) {
+      await notify(change.requestedBy, "due_change_decided", {
+        title: `${d.approve ? "New due date approved" : "Due date change turned down"} for “${change.task.title}”`,
+        body: `${change.task.project.code} · ${formatDate(isoDate(change.toDate))}${d.note ? ` · ${d.note}` : ""}`,
+        path: taskPath(change.task.projectId, change.task.id),
+        refId: change.task.id,
+      });
+    }
+    revalidateTasks(change.task.projectId);
   });
 }

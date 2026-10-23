@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EMPLOYMENT_TYPES, USER_ROLES } from "@/lib/roles";
+import { ACCESS_LEVELS, APP_MODULES, DIVISIONS, EMPLOYMENT_TYPES, USER_ROLES } from "@/lib/roles";
 import { isIsoDate } from "@/lib/time/pure";
 
 /**
@@ -92,6 +92,15 @@ export const personAdminSchema = z.object({
   role: z.enum(USER_ROLES),
   employmentType: z.enum(EMPLOYMENT_TYPES),
   isAdmin: z.boolean(),
+  // Phase 2 — People module: job role, division, level, title, manager.
+  jobRoleId: z.string().optional().transform((v) => (v ? v : null)).pipe(z.string().uuid().nullable()),
+  division: z.enum(DIVISIONS).nullable(),
+  level: z.number().int().min(1).max(5).nullable(),
+  jobTitle: z.string().trim().max(120).optional().transform((v) => (v ? v : null)),
+  managerId: z.string().optional().transform((v) => (v ? v : null)).pipe(z.string().uuid().nullable()),
+  // Admin only — access and modules.
+  accessLevel: z.enum(ACCESS_LEVELS),
+  modules: z.array(z.enum(APP_MODULES)).max(APP_MODULES.length),
 });
 export type PersonAdminInput = z.input<typeof personAdminSchema>;
 
@@ -104,6 +113,7 @@ export const settingsFormSchema = z.object({
   reminder_time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:MM"),
   workdays: z.array(z.number().int().min(1).max(7)).min(1, "Pick at least one workday"),
   default_alert_thresholds: thresholds,
+  sales_stale_days: z.number({ error: "Enter days" }).int("Whole days").min(1, "1–365 days").max(365, "1–365 days"),
   currencies: z.array(z.enum(CURRENCIES)).min(1, "Keep at least one currency"),
   base_currency: z.enum(CURRENCIES),
   invoice_number_format: text(40).refine((v) => v.includes("{SEQ}"), "Include {SEQ}"),
@@ -202,6 +212,9 @@ export type ProjectInput = z.input<typeof projectSchema>;
 
 export const sectionSchema = z.object({ name: text(80).min(1, "Enter a name") });
 
+/** PRD Phase 2: at least one hour — smaller work goes in a checklist. */
+const taskEstimate = z.number({ error: "Enter hours" }).finite().min(1, "At least 1 hour — fold smaller work into a checklist").max(1000);
+
 export const taskSchema = z.object({
   title: text(240).min(1, "Enter a title"),
   sectionId: uuid,
@@ -210,7 +223,10 @@ export const taskSchema = z.object({
   priority: z.enum(TASK_PRIORITIES).default("normal"),
   status: z.enum(TASK_STATUSES).default("todo"),
   dueDate: optionalIsoDate,
-  estimateHours: optionalHours,
+  estimateHours: taskEstimate.nullable().optional().transform((v) => (v == null ? null : v)),
+  typeId: optionalUuid,
+  reviewerId: optionalUuid,
+  deliverableUrl: optionalUrl,
 });
 export type TaskInput = z.input<typeof taskSchema>;
 
@@ -223,10 +239,22 @@ export const taskPatchSchema = z
     priority: z.enum(TASK_PRIORITIES),
     status: z.enum(TASK_STATUSES),
     dueDate: isoDate.nullable(),
-    estimateHours: hours.nullable(),
+    estimateHours: taskEstimate.nullable(),
+    typeId: uuid,
+    reviewerId: z.string().uuid().nullable(),
+    deliverableUrl: z.string().trim().url("Enter a valid URL").nullable(),
+    /** Required when a due date that's already set moves (PRD Phase 2). */
+    dueReason: text(500),
   })
   .partial();
 export type TaskPatch = z.input<typeof taskPatchSchema>;
+
+export const reviewDecisionSchema = z.object({
+  decision: z.enum(["approve", "changes"]),
+  note: optionalText(2000),
+});
+
+export const dueChangeDecisionSchema = z.object({ approve: z.boolean(), note: optionalText(500) });
 
 export const commentSchema = z.object({ text: text(5000).min(1, "Write a comment") });
 
@@ -286,10 +314,16 @@ export const paymentRequestSchema = z.object({
   dueDate: isoDate,
 });
 
+export const PAYMENT_PLATFORMS = ["xendit", "bank_transfer", "wise", "paypal", "other"] as const;
+export const INVOICE_KINDS = ["dp", "term", "final"] as const;
+
 export const invoiceSchema = z.object({
   projectId: uuid,
   issueDate: isoDate,
   notes: optionalText(2000),
+  /** Phase 2 · M9 — DP / term / final, and how the client pays. */
+  kind: z.enum(INVOICE_KINDS).nullable().optional().transform((v) => v ?? null),
+  platform: z.enum(PAYMENT_PLATFORMS).default("xendit"),
   items: z.array(invoiceItemSchema).min(1, "Add at least one item").max(100),
   requests: z.array(paymentRequestSchema).min(1, "Add at least one payment request").max(12),
 });
@@ -378,3 +412,290 @@ export const dashboardRulesSchema = z.object({
     .object({ good: z.number().min(1).max(1000), watch: z.number().min(0).max(1000), concentration: percent, utilizationBand: percent })
     .refine((t) => t.watch < t.good, { message: "Watch must be below Good", path: ["watch"] }),
 });
+
+// ---------------------------------------------------------------------------
+// HR — calendar and leave
+// ---------------------------------------------------------------------------
+
+export const HR_EVENT_COLORS = ["gray", "blue", "green", "amber", "red", "purple", "teal"] as const;
+export const HR_EVENT_RECURRENCES = ["none", "weekly", "monthly"] as const;
+export const LEAVE_KINDS = ["annual_leave", "permit", "sick", "other"] as const;
+
+const clock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Enter a time like 09:30");
+
+/** One event's details — shared by "add", "edit the series" and "edit only this one". */
+export const hrEventFieldsSchema = z
+  .object({
+    title: text(200).min(1, "Give the event a title"),
+    notes: optionalText(2000),
+    color: z.enum(HR_EVENT_COLORS).default("blue"),
+    startDate: isoDate,
+    endDate: isoDate,
+    allDay: z.boolean().default(true),
+    startTime: clock.optional(),
+    endTime: clock.optional(),
+  })
+  .refine((v) => v.endDate >= v.startDate, { message: "Ends before it starts", path: ["endDate"] })
+  .refine((v) => v.allDay || (v.startTime && v.endTime), { message: "Set a start and end time", path: ["startTime"] })
+  .refine((v) => v.allDay || v.endDate > v.startDate || (v.endTime ?? "") > (v.startTime ?? ""), { message: "Ends before it starts", path: ["endTime"] });
+
+export const hrEventSchema = hrEventFieldsSchema.and(
+  z
+    .object({ recurrence: z.enum(HR_EVENT_RECURRENCES).default("none"), repeatUntil: optionalIsoDate })
+    .transform((v) => (v.recurrence === "none" ? { ...v, repeatUntil: undefined } : v)),
+);
+export type HrEventInput = z.input<typeof hrEventSchema>;
+
+/** Edit or delete: the whole series, or just the occurrence that starts on `occurrenceDate`. */
+export const hrEventScopeSchema = z.object({ id: uuid, scope: z.enum(["series", "occurrence"]), occurrenceDate: isoDate });
+
+export const leaveRequestSchema = z
+  .object({
+    kind: z.enum(LEAVE_KINDS),
+    startDate: isoDate,
+    endDate: isoDate,
+    halfDay: z.boolean().default(false),
+    reason: optionalText(500),
+  })
+  .refine((v) => v.endDate >= v.startDate, { message: "Ends before it starts", path: ["endDate"] })
+  .refine((v) => !v.halfDay || v.endDate === v.startDate, { message: "A half day covers one day", path: ["halfDay"] });
+export type LeaveRequestInput = z.input<typeof leaveRequestSchema>;
+
+export const leaveDecisionSchema = z.object({ id: uuid, decision: z.enum(["approved", "rejected"]), note: optionalText(500) });
+
+// ---------------------------------------------------------------------------
+// Phase 2 · M6 — job roles, task types, holidays, attendance
+// ---------------------------------------------------------------------------
+
+export const jobRoleSchema = z.object({
+  name: text(120).min(1, "Enter a name"),
+  division: z.enum(DIVISIONS),
+  level: z.number().int().min(1).max(5),
+  defaultAccess: z.enum(ACCESS_LEVELS),
+  defaultModules: z.array(z.enum(APP_MODULES)).max(APP_MODULES.length),
+  hasOkr: z.boolean(),
+});
+export type JobRoleInput = z.input<typeof jobRoleSchema>;
+
+export const taskTypeSchema = z.object({ name: text(60).min(1, "Enter a name") });
+
+export const holidaySchema = z.object({ date: isoDate, name: text(120).min(1, "Enter a name") });
+export type HolidayInput = z.input<typeof holidaySchema>;
+
+export const ATTENDANCE_STATUSES = ["present", "remote", "off"] as const;
+export const attendanceSchema = z.object({ status: z.enum(ATTENDANCE_STATUSES), note: optionalText(500) });
+
+// ---------------------------------------------------------------------------
+// Phase 2 · M7 — KPI & OKR
+// ---------------------------------------------------------------------------
+
+export const objectionSchema = z.object({ metricKey: optionalText(80), reason: text(2000).min(10, "Explain what's wrong (at least a sentence)") });
+export const objectionDecisionSchema = z.object({ upheld: z.boolean(), note: text(2000).min(1, "Add a note for the person") });
+
+const optionalNumber = z.number().finite().min(0).max(1_000_000).nullable().optional().transform((v) => (v == null ? null : v));
+
+export const WORK_LOG_KIND_VALUES = ["shot", "content", "idea", "support_request", "qc_record", "error", "release", "testimony", "challenge"] as const;
+export const workLogSchema = z.object({
+  kind: z.enum(WORK_LOG_KIND_VALUES),
+  userId: optionalUuid,
+  projectId: optionalUuid,
+  taskId: optionalUuid,
+  occurredOn: isoDate,
+  title: text(200).min(1, "Give it a title"),
+  description: optionalText(4000),
+  tag: optionalText(40),
+  link: optionalUrl,
+  value: optionalNumber,
+  total: optionalNumber,
+});
+export type WorkLogInput = z.input<typeof workLogSchema>;
+
+export const workLogReviewSchema = z.object({ approve: z.boolean(), note: optionalText(1000), value: optionalNumber });
+
+export const ratingSubmitSchema = z.object({
+  formId: uuid,
+  subjectId: uuid,
+  periodStart: isoDate,
+  scores: z.record(z.string().uuid(), z.number().int().min(1, "Score 1–5").max(5, "Score 1–5")),
+  comment: optionalText(2000),
+});
+
+export const objectiveSchema = z.object({
+  cycleId: uuid,
+  title: text(200).min(1, "Give the objective a title"),
+  description: optionalText(2000),
+  isStudio: z.boolean().default(false),
+  parentId: optionalUuid,
+  ownerIds: z.array(z.string().uuid()).min(1, "Pick at least one owner").max(10),
+});
+export type ObjectiveInput = z.input<typeof objectiveSchema>;
+
+export const KEY_RESULT_KINDS = ["milestone", "count", "percent", "lower_better", "kpi_linked"] as const;
+export const KEY_RESULT_SOURCES = ["metric", "tasks", "manual"] as const;
+export const keyResultSchema = z
+  .object({
+    title: text(200).min(1, "Give the key result a title"),
+    kind: z.enum(KEY_RESULT_KINDS),
+    source: z.enum(KEY_RESULT_SOURCES),
+    metricId: optionalUuid,
+    startValue: optionalNumber,
+    targetValue: optionalNumber,
+    unit: text(30).default(""),
+    doneDefinition: optionalText(1000),
+    approverId: optionalUuid,
+    taskIds: z.array(z.string().uuid()).max(50).default([]),
+  })
+  .superRefine((k, ctx) => {
+    if ((k.source === "metric" || k.kind === "kpi_linked") && !k.metricId) ctx.addIssue({ code: "custom", message: "Pick the metric", path: ["metricId"] });
+    if (k.kind !== "milestone" && k.targetValue === null) ctx.addIssue({ code: "custom", message: "Set a target", path: ["targetValue"] });
+    if (k.kind === "milestone" && !k.approverId) ctx.addIssue({ code: "custom", message: "A milestone needs an approver (the direct manager)", path: ["approverId"] });
+  });
+export type KeyResultInput = z.input<typeof keyResultSchema>;
+
+export const krCheckinSchema = z.object({ month: isoDate, value: optionalNumber, note: optionalText(1000), evidenceUrl: optionalUrl });
+export const okrCycleSchema = z.object({ name: text(60).min(1, "Name the cycle"), startDate: isoDate, endDate: isoDate, status: z.enum(["draft", "active", "closed"]) });
+
+export const metricSaveSchema = z.object({
+  name: text(80).min(1, "Name the metric"),
+  description: optionalText(2000),
+  unit: text(30).default(""),
+  direction: z.enum(["higher", "lower", "record"]),
+  manual: z.boolean().default(false),
+  definition: z.unknown(),
+});
+export type MetricSaveInput = z.input<typeof metricSaveSchema>;
+
+export const templateMetaSchema = z.object({ name: text(80).min(1, "Name the template"), kind: z.enum(["core", "addon"]), description: optionalText(2000) });
+export type TemplateMetaInput = z.input<typeof templateMetaSchema>;
+
+export const templateItemsSchema = z
+  .array(
+    z.object({
+      metricId: uuid,
+      target: z.number().finite().min(0).max(1_000_000).nullable(),
+      targetPer: z.enum(["week", "month", "semester"]),
+      scorePeriod: z.enum(["monthly", "semester"]),
+      weight: z.number().finite().min(0).max(100),
+      recordOnly: z.boolean(),
+      tag: z.string().trim().max(40).nullable().optional().transform((v) => (v ? v : null)),
+    }),
+  )
+  .max(30);
+export type TemplateItemsInput = z.input<typeof templateItemsSchema>;
+
+export const roleTemplatesSchema = z.object({ core: z.array(z.string().uuid()).max(5), addons: z.array(z.string().uuid()).max(10) });
+export const personAssignmentSchema = z.object({ userId: uuid, lineageId: uuid, kind: z.enum(["core", "addon"]) });
+
+export const ratingFormSchema = z.object({
+  metricId: uuid,
+  name: text(80).min(1, "Name the form"),
+  frequency: z.enum(["weekly", "monthly"]),
+  raterKind: z.enum(["manager", "self", "project_peer", "job_role", "assigned"]),
+  raterJobRoleId: optionalUuid,
+  needsApproval: z.boolean(),
+  criteria: z
+    .array(z.object({ title: text(120).min(1, "Name each criterion"), scale: z.array(text(300).min(1, "Describe every score")).length(5) }))
+    .min(1, "Add at least one criterion")
+    .max(10),
+});
+export type RatingFormInput = z.input<typeof ratingFormSchema>;
+export const formRatersSchema = z.object({ subjectId: uuid, raterIds: z.array(z.string().uuid()).max(20) });
+
+// ---------------------------------------------------------------------------
+// Phase 2 · M9 — Sales
+// ---------------------------------------------------------------------------
+
+export const STAGE_CATEGORIES = ["open", "won", "lost"] as const;
+const probability = z.number({ error: "Enter a probability" }).int("Whole percent").min(0, "0 or more").max(100, "100 at most");
+
+export const stageSchema = z.object({
+  name: text(60).min(1, "Name the stage"),
+  category: z.enum(STAGE_CATEGORIES),
+  probability,
+});
+export type StageInput = z.input<typeof stageSchema>;
+
+export const dealSchema = z
+  .object({
+    title: text(160).min(1, "Name the deal"),
+    clientId: optionalUuid,
+    prospectName: optionalText(160),
+    value: amount,
+    currency: z.enum(CURRENCIES),
+    probability,
+    expectedClose: optionalIsoDate,
+    ownerId: optionalUuid,
+    leadSource: optionalText(80),
+    serviceType: optionalText(80),
+    stageId: uuid,
+    lostReason: optionalText(500),
+    notes: optionalText(4000),
+  })
+  .refine((v) => v.clientId || v.prospectName, { message: "Choose a client or name the prospect", path: ["prospectName"] });
+export type DealInput = z.input<typeof dealSchema>;
+
+export const dealMoveSchema = z.object({ stageId: uuid, lostReason: optionalText(500) });
+
+const fxRate = z.number({ error: "Enter the rate" }).finite().positive("More than zero").max(1_000_000_000).nullable().optional().transform((v) => v ?? null);
+
+export const paymentProofSchema = z.object({
+  paymentRequestId: optionalUuid,
+  amount: amount.refine((v) => v > 0, "More than zero"),
+  paidOn: isoDate,
+  platform: z.enum(PAYMENT_PLATFORMS),
+  note: optionalText(1000),
+  fxRateToIdr: fxRate,
+});
+export type PaymentProofInput = z.input<typeof paymentProofSchema>;
+
+export const proofDecisionSchema = z
+  .object({ verify: z.boolean(), note: optionalText(1000), fxRateToIdr: fxRate })
+  .refine((v) => v.verify || v.note, { message: "Say why the proof is rejected", path: ["note"] });
+
+// ---------------------------------------------------------------------------
+// Phase 2 · M10 — Finance obligations
+// ---------------------------------------------------------------------------
+
+export const OBLIGATION_KINDS = ["payroll", "bpjs", "tax", "other"] as const;
+export const OBLIGATION_RECURRENCES = ["monthly", "yearly", "once"] as const;
+
+export const obligationSchema = z
+  .object({
+    title: text(120).min(1, "Name it"),
+    kind: z.enum(OBLIGATION_KINDS),
+    recurrence: z.enum(OBLIGATION_RECURRENCES),
+    dayOfMonth: z.number({ error: "Enter a day" }).int().min(1, "1–31").max(31, "1–31"),
+    month: z.number().int().min(1).max(12).nullable().optional().transform((v) => v ?? null),
+    onDate: optionalIsoDate,
+    amountEstimate: amount.nullable().optional().transform((v) => v ?? null),
+    currency: z.enum(CURRENCIES).default("IDR"),
+    notes: optionalText(1000),
+    isActive: z.boolean().default(true),
+  })
+  .refine((v) => v.recurrence !== "yearly" || v.month, { message: "Choose the month", path: ["month"] })
+  .refine((v) => v.recurrence !== "once" || v.onDate, { message: "Choose the date", path: ["onDate"] });
+export type ObligationInput = z.input<typeof obligationSchema>;
+
+export const obligationDoneSchema = z.object({ obligationId: uuid, dueDate: isoDate, done: z.boolean() });
+
+// ---------------------------------------------------------------------------
+// Sales CRM — Companies and People with custom columns
+// ---------------------------------------------------------------------------
+
+export const CRM_OBJECTS = ["company", "person"] as const;
+
+export const crmColumnSchema = z.object({
+  object: z.enum(CRM_OBJECTS),
+  name: text(60).min(1, "Name the column"),
+  type: z.enum(["text", "number", "currency", "date", "checkbox", "select", "multi_select", "url", "email", "phone"]),
+  options: z.array(z.object({ id: z.string().min(1).max(40), label: text(60).min(1, "Name the option"), color: z.string().max(20) })).max(50).default([]),
+});
+export type CrmColumnInput = z.input<typeof crmColumnSchema>;
+
+export const crmColumnEditSchema = crmColumnSchema.pick({ name: true, options: true });
+
+export const crmCompanySchema = z.object({ name: text(160).min(1, "Name the company"), domain: optionalText(200) });
+export const crmPersonSchema = z.object({ name: text(160).min(1, "Enter a name"), email: optionalEmail, companyId: optionalUuid });
+
+/** One cell: a built-in field by name, or a custom column by id. */
+export const crmFieldSchema = z.object({ object: z.enum(CRM_OBJECTS), id: uuid, key: z.string().min(1).max(60), value: z.unknown() });

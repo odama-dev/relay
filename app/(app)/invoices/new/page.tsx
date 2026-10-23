@@ -64,6 +64,8 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: P
         initial={{
           issueDate: today,
           notes: "",
+          kind: null,
+          platform: "xendit",
           items: [{ description: "", quantity: 1, unitPrice: null }],
           requests: [
             { label: "Down Payment", percent: 50, amount: null, dueDate: addDays(today, 7) },

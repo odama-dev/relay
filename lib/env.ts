@@ -40,8 +40,6 @@ export const devAuthEmail = (
   "admin@odama.io"
 ).toLowerCase();
 
-/** Feature flag `dashboard_phase2` (PRD/OVERVIEW-SPEC.md §1.5): shows the Phase 2 dashboard cards. */
-export const dashboardPhase2 = process.env.DASHBOARD_PHASE2 === "true";
 
 export const resendConfigured = Boolean(env.resendApiKey);
 export const slackConfigured = Boolean(env.slackBotToken);

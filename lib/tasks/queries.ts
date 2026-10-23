@@ -4,6 +4,8 @@ import { asUser, type CurrentUser } from "@/lib/auth";
 import { num } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 import { isoDate, todayIn } from "@/lib/time/pure";
+import { effectiveDue, isOverdueTiming } from "@/lib/tasks/pure";
+import { taskTimings, workCalendar } from "@/lib/tasks/timing";
 
 export type TaskPerson = { id: string; name: string; avatarUrl: string | null };
 
@@ -66,17 +68,21 @@ export type SectionRow = { id: string; name: string; position: number };
 export async function getProjectBoard(user: CurrentUser, projectId: string) {
   const today = todayIn(user.timezone);
   return asUser(user, async (tx) => {
-    const [sections, tasks] = await Promise.all([
+    const [sections, tasks, types, reviewers] = await Promise.all([
       tx.section.findMany({ where: { projectId, archivedAt: null }, orderBy: [{ position: "asc" }, { createdAt: "asc" }] }),
       tx.task.findMany({
         where: { projectId, section: { archivedAt: null } },
         include: rowInclude,
         orderBy: [{ position: "asc" }, { createdAt: "asc" }],
       }),
+      tx.taskType.findMany({ where: { archivedAt: null }, orderBy: [{ position: "asc" }, { name: "asc" }], select: { id: true, name: true, key: true } }),
+      tx.profile.findMany({ where: { status: "active" }, orderBy: { fullName: "asc" }, select: { id: true, fullName: true, avatarUrl: true } }),
     ]);
     return {
       sections: sections.map((s) => ({ id: s.id, name: s.name, position: s.position })),
       tasks: tasks.map((t) => toRow(t, user.id, today)),
+      types,
+      reviewers: reviewers.map(person),
     };
   });
 }
@@ -127,9 +133,19 @@ export async function getTaskDetail(user: CurrentUser, taskId: string) {
           },
         },
         activity: { orderBy: { createdAt: "asc" }, include: { actor: { select: { fullName: true } } } },
+        type: { select: { id: true, name: true, key: true } },
+        reviewer: { select: { id: true, fullName: true, avatarUrl: true } },
+        reviewRounds: { orderBy: { submittedAt: "desc" }, include: { reviewer: { select: { fullName: true } } } },
+        dueChanges: { orderBy: { createdAt: "desc" }, include: { requester: { select: { fullName: true } } } },
       },
     });
     if (!task) return null;
+    const [types, studio, timing, calendar] = await Promise.all([
+      tx.taskType.findMany({ where: { OR: [{ archivedAt: null }, { id: task.typeId ?? undefined }] }, orderBy: [{ position: "asc" }, { name: "asc" }], select: { id: true, name: true } }),
+      tx.profile.findMany({ where: { status: "active" }, orderBy: { fullName: "asc" }, select: { id: true, fullName: true, avatarUrl: true } }),
+      taskTimings(tx, [task], user.timezone),
+      workCalendar(tx),
+    ]);
     const [sections, members, canEdit, canManage] = await Promise.all([
       tx.section.findMany({ where: { projectId: task.projectId, archivedAt: null }, orderBy: { position: "asc" }, select: { id: true, name: true } }),
       tx.projectMember.findMany({
@@ -139,7 +155,7 @@ export async function getTaskDetail(user: CurrentUser, taskId: string) {
       tx.$queryRaw<{ ok: boolean }[]>`SELECT app.can_edit_task(${taskId}::uuid) AS ok`,
       tx.$queryRaw<{ ok: boolean }[]>`SELECT app.can_manage_project(${task.projectId}::uuid) AS ok`,
     ]);
-    return { task, sections, members, canEdit: canEdit[0]?.ok ?? false, canManage: canManage[0]?.ok ?? false };
+    return { task, sections, members, types, studio, timing: timing.get(task.id)!, calendar, canEdit: canEdit[0]?.ok ?? false, canManage: canManage[0]?.ok ?? false };
   });
   if (!data) return null;
   const { task } = data;
@@ -149,9 +165,46 @@ export async function getTaskDetail(user: CurrentUser, taskId: string) {
   const logged = await prisma.timeEntry.aggregate({ where: { taskId }, _sum: { minutes: true }, _count: true });
   const today = todayIn(user.timezone);
 
+  const effective = effectiveDue(data.timing, today, data.calendar);
+  const missing = [
+    !task.dueDate && "due date",
+    task.estimateHours === null && "estimate",
+    !task.reviewerId && "reviewer",
+  ].filter((x): x is string => Boolean(x));
+
   return {
     ...toRow(task as unknown as RawTask, user.id, today),
+    overdue: isOverdueTiming(data.timing, today, data.calendar) || (task.status !== "done" && Boolean(effective && effective < today)),
     description: task.description,
+    type: task.type,
+    types: data.types,
+    reviewer: task.reviewer ? person(task.reviewer) : null,
+    /** Everyone active may review — not only project members. */
+    reviewers: data.studio.map(person),
+    deliverableUrl: task.deliverableUrl,
+    originalDueDate: task.originalDueDate ? isoDate(task.originalDueDate) : null,
+    effectiveDue: effective,
+    approvedAt: task.approvedAt,
+    /** Fields PRD Phase 2 requires that this task still lacks. */
+    missing,
+    reviewRounds: task.reviewRounds.map((r) => ({
+      id: r.id,
+      reviewer: r.reviewer?.fullName ?? "—",
+      submittedAt: r.submittedAt,
+      slaDueAt: r.slaDueAt,
+      decidedAt: r.decidedAt,
+      decision: r.decision,
+      note: r.note,
+    })),
+    dueChanges: task.dueChanges.map((c) => ({
+      id: c.id,
+      from: c.fromDate ? isoDate(c.fromDate) : null,
+      to: isoDate(c.toDate),
+      reason: c.reason,
+      requester: c.requester?.fullName ?? "—",
+      createdAt: c.createdAt,
+      state: c.approvedAt ? ("approved" as const) : c.rejectedAt ? ("rejected" as const) : ("pending" as const),
+    })),
     estimateHours: num(task.estimateHours),
     createdAt: task.createdAt,
     completedAt: task.completedAt,
@@ -185,6 +238,8 @@ export async function getTaskDetail(user: CurrentUser, taskId: string) {
     viewer: {
       canEdit: data.canEdit,
       canManage: data.canManage,
+      /** The reviewer — or the PM / C-Level acting for them — decides an open review. */
+      canReview: task.status === "review" && (task.reviewerId === user.id || data.canManage),
       canComment: true,
       canDelete: data.canManage && logged._count === 0,
       canLogTime: task.project.status === "active" || task.project.status === "on_hold",

@@ -175,7 +175,7 @@ there); the card set follows `profiles.role`, `is_admin` doesn't change it.
 - **DD-3** opens the task panel; it doesn't scroll to the comment yet.
 - **SL-1 / SL-2 "Send"** open the invoice with `?send=1`, which opens the
   existing Send dialog (preview, recipients) — no second send flow.
-- **Phase 2 cards** are empty slots behind `DASHBOARD_PHASE2=true` (the spec's
+- **Phase 2 cards** (superseded by Phase 2 · M8 below) were empty slots behind `DASHBOARD_PHASE2=true` (the spec's
   `dashboard_phase2` flag, `lib/env.ts`).
 
 ## Expenses (2026-10-16, beyond the PRD)
@@ -323,3 +323,345 @@ Still Fluid Functionalism components; only the shell and page chrome changed.
   `components/file-type-icons.tsx` draws CSV and PDF glyphs on its 24-grid
   file outline; they live in the `icons` map (`csv`, `pdf`) like any other
   icon. Every CSV export/template button uses `csv`, the invoice PDF uses `pdf`.
+
+## Kanban is the default task view (2026-10-20)
+
+My Tasks and a project's Tasks open on Kanban for every role; List is one
+click away and kept in the URL as `?view=list`. The toggle lists Kanban first.
+
+## Role dashboards in the C-Level layout (2026-10-20)
+
+Sales, PM, Designer & Developer and HR dashboards follow the C-Level overview:
+a full-bleed header, one `SummaryStrip` of KPIs, cards on the grid, tables
+edge to edge. PM and Designer & Developer KPIs take a period (`?period=`:
+this week by default, this month, last 3 / 6 months) compared with the same
+number of days before (`resolveWorkPeriod`, `lib/dashboard/pure.ts`).
+"Shots" on the Designer & Developer strip are the tasks they finished on
+internal projects. Invoice-list and Sales totals are normalised to IDR at
+ECB reference rates (Frankfurter, `lib/fx.ts`, cached 6h) — indicative only;
+the C-Level dashboard still uses `fx_reference_rates`.
+
+The Designer & Developer dashboard swaps the hours chart for a calendar of
+their work (`?month=`, or `?view=week&week=`), sharing the month grid with HR's calendar
+(`components/calendar/month-grid.tsx`): projects with an end date are bars,
+open-ended ones (retainers) sit in one "Ongoing" row so they don't fill
+every week, and their tasks sit on the due day in the project's hue. The
+week view has no hour grid (time entries carry no clock time): project bars
+over a column per day with that day's tasks as cards and the hours logged. Beside
+it: an 18-week heat calendar of logged hours and recent comments on their
+tasks.
+
+## HR dashboard, calendar and leave (2026-10-20, beyond the PRD)
+
+- **HR reads every task.** `app.can_view_tasks` lets HR read all tasks (and
+  so sections, comments, collaborators, activity) without being a project
+  member, to see each person's to-do and what they're working on. Writing is
+  unchanged. This replaces the PRD's "HR sees counts only"; the Projects /
+  Tasks screens are still not offered to HR (`perms.viewTasks`).
+- **HR calendar is HR's alone** (`hr_events`, `hr_event_exceptions`): not
+  C-Level, not admins. Events are all day or timed (wall-clock "HH:MM"),
+  repeat weekly or monthly until an optional date; a monthly event on the
+  31st falls on a short month's last day. "Only this one" edits and deletes
+  are exceptions keyed by the occurrence's series date; changing a series'
+  timing drops them. The month grid starts on Sunday, as in the reference.
+- **Leave is request + approval** (`leave_requests`): members ask for
+  themselves (from the Timesheet), HR or an admin decides — never their own
+  request — and both sides are notified (`leave_requested`, `leave_decided`).
+  Approval writes a `capacity_overrides` row (kind + `leave_request_id`) so
+  utilization counts it; cancelling an approved request removes it, and such
+  rows can only change through the request. A half day is a tenth of the
+  person's weekly hours (4h without a capacity row).
+- **Workload** = estimated hours of open tasks due by Sunday (overdue
+  included) against weekly hours less this week's leave; tasks without an
+  estimate count zero and are flagged in the tooltip.
+
+## PM dashboard in the HR layout (2026-10-21)
+
+The PM dashboard drops its card grid (PM-1…PM-4 and the team-hours chart)
+for HR's shape: the period strip, a month calendar beside a project status
+column, then the team table. Approvals, billing and tasks at risk stay on
+their own screens; the strip still counts out-of-scope hours waiting and
+overdue / blocked / ownerless tasks.
+
+- **Calendar** shows only the projects the PM runs (active / on hold), start
+  to end; an open end runs to the grid's last day. Three bars per week; the
+  rest are dots in the day that open the day's list. A bar opens the project.
+- **Project colour** is `projects.calendar_color` (`hr_event_color`, null =
+  a hue from the id), set from the dot in the status list or the calendar's
+  colour popover. It's written through `projects_update`, so the project's
+  PM, Sales and C-Level may change it; the Designer & Dev calendar uses it too.
+- **Standing** (`projectStanding`, `lib/dashboard/pure.ts`): *delayed* past
+  the end date or with overdue tasks; *at risk* on a budget warning or over,
+  a blocked task, on hold, or ending within 7 days with open tasks; *on
+  track* otherwise.
+- **Team** = active members of the PM's running projects (the PM aside).
+  The chevron lists every running project they're on today (started, not
+  completed / archived), other PMs' included. Time and tasks are read under
+  RLS, so hours, open tasks and utilization cover the projects the PM is a
+  member of; other PMs' rows show "—". Utilization = billable hours this
+  week ÷ weekly capacity less leave (`weekCapacityHours`, `lib/hr/pure.ts`).
+
+## Phase 2 · M6 Foundation (2026-10-22, `PRD/PRD_Fase-2.md`)
+
+- **Roles, step by step.** The six `user_role` values stay: they pick the
+  dashboard preset and keep driving every Phase 1 policy. Phase 2 adds, on
+  `profiles`, a job role (catalogue `job_roles`), division, level 1–5, free
+  job title, access (`manager` / `member`; admin stays `is_admin`) and a
+  direct manager (`manager_id`, no loops), plus per-person modules in
+  `module_grants` (People, Finance, Sales, Studio Report). New tables use
+  `app.has_module()` and `app.is_manager_of()` (whole reporting line).
+  Existing people were backfilled from their role (C-Level → all modules,
+  Finance / Sales / HR → their own; PM and C-Level → manager); a new profile
+  gets the same preset by trigger. Admins hold every module.
+- **Who changes what.** Job role, division, level, title and manager: the
+  People module (HR by default). Access level and modules: admins only. The
+  person dialog sends only changed fields; `profiles_guard` decides.
+- **Change log** for access and (later) KPI/OKR definitions is
+  `activity_log` through `logActivity` — no second audit table.
+- **Metric Dictionary** (`lib/metrics/pure.ts`, words in
+  `lib/metrics/definitions.ts`, page `/metrics`). One definition each for
+  week, logged / billable hours, capacity, utilization, workload, on time,
+  margin. Fixes from the PRD review: billable everywhere = client-task time
+  not waiting on an out-of-scope decision; capacity = contract hours less
+  leave (half days included) and public holidays (`public_holidays`), one
+  function for C-Level, PM and HR (`weekCapacityHours` is gone); studio
+  utilization counts billable divisions only (Design, Development,
+  Project), the rest stays visible per role; workload has its own colour
+  (brand) and label, amber when overdue work fills most of it; PM "Team
+  hours" says it includes the PM, "Team today" that it doesn't; running
+  fixed-price projects show budget burn vs progress instead of margin and
+  don't rank in the best/worst margins; the C-Level finance card says it is
+  cash basis (decision: cash, PRD open question).
+- **Tasks.** `task_types` (Regular, Revision, Bug, Report, Content; the
+  People module adds more; the `key` never changes so metrics keep
+  matching), `reviewer_id` (anyone active — the reviewer sees and edits the
+  task without being on the project), `deliverable_url`,
+  `original_due_date` (locked), `approved_at`. Statuses read **In review**
+  and **Approved** (values `review`, `done`). `tasks_review_flow`: only the
+  reviewer, the project's PM or C-Level approve or send back; the owner may
+  pull a task out of review; without a reviewer the project's PM reviews.
+  Each submission opens a `review_rounds` row with a one-working-day SLA
+  (`app.add_workdays`, Asia/Jakarta, holidays off). Hourly job
+  `review-sla` tells the reviewer and the PM once per round (daily on
+  Vercel, plan limit).
+- **Due dates.** A due date that's set changes only with a reason through
+  `due_date_changes`: the PM's own change is approved at once, anyone
+  else's waits for the PM (approve / decline). The task trigger refuses a
+  move without an approved change in the same transaction.
+- **Effective due & on time** (`lib/tasks/pure.ts`): agreed due (first due,
+  moved by changes approved before it passed) + the reviewer's working days
+  past SLA. On time = approved ≤ effective due; tasks without a due date
+  aren't counted. Every dashboard's on-time figure goes through
+  `onTimeInputs` (`lib/tasks/timing.ts`). Tasks done before Phase 2 count
+  their completion day as the approval.
+- **Required fields.** The New task dialog requires type, reviewer, due
+  date and an estimate of at least one hour; quick add (title only) still
+  works and the task shows "Missing …" until filled — the PRD's ≥ 95 %
+  target is measured, not forced.
+- **Attendance** (`attendance`): people check in from the Timesheet header
+  (in office / remote / off). HR's "Working today" counts check-ins and
+  leave, not logged hours. Managers and the People / Studio Report modules
+  read it.
+
+## Phase 2 · M7 KPI & OKR (2026-10-22)
+
+- **Metrics are definitions** (`metrics.definition`, schema in
+  `lib/kpi/definition.ts`): source (tasks, work-log kinds, projects,
+  attendance, timesheet, reviews, ratings, manual), scope (self / team),
+  filters, calculation (count, sum, percent — optionally scored per week
+  and averaged —, ratio, average per value / week / deliverable, rating,
+  composite) and direction. The engine (`lib/kpi/engine.ts`) loads rows
+  per source (`lib/kpi/sources.ts`) and aggregates them in pure TS
+  (`lib/kpi/pure.ts`), so a new metric needs no deploy. Every metric
+  gets its plain sentence and a last-month preview in the builder.
+- **One `work_logs` table** for the "Log di OS" sources (shot, content,
+  idea, support request, QC record, error, release, testimony, challenge)
+  instead of nine tables: kind, tags, link, evidence file (`evidence`
+  bucket), value / total for counts and ratios, and a review by the
+  person's managers, the project's PM, People or C-Level — never by the
+  person. Ideas not answered within 3 working days count anyway.
+- **Templates are versioned**: a lineage of versions, Draft → Active (from
+  the 1st of next month; the version it replaces is archived) → Archived.
+  Active versions and their items are locked by trigger. Templates attach
+  to job roles (core + add-ons); a person's own core assignment replaces
+  the role's, add-ons stack. Assignment changes start next month.
+- **Scoring** follows the PRD table; the score is the weighted average of
+  items with data; semester items show as progress inside a month and are
+  scored in the semester result. Pro-rata (contract hours ÷ 40 × share of
+  the period employed) applies to count targets where more is better
+  only — caps (lower is better) don't loosen. Calibration: the first two
+  months after a person's first assignment or a template's first version.
+  Job role changes aren't tracked as history yet, so a promotion
+  calibrates only through its new assignment.
+- **Results are snapshots** (`kpi_results`, job `kpi-snapshot` on the 1st,
+  plus the half-year on 1 Jan / 1 Jul): items are stored with their
+  targets and scores, so editing a metric or template never changes past
+  scores. Objections: the person, within 7 days, decided by People.
+- **Live KPI pages compute on the system connection** after
+  `app.can_view_kpi()` proved access under RLS (the person, their managers
+  up the line, People, Studio Report) — the same computation the snapshot
+  job runs. Individual rating answers stay hidden from the person rated.
+- **Ratings**: raters are the manager, the person (self-assessment, HR
+  approves), peers on a shared project that week (tasks or time), a job
+  role, or named raters; the guard re-checks the rater, derives the
+  average and requires a comment under 3.
+- **OKR**: members propose their own, managers for their team, People
+  approves; studio objectives come from Studio Report and start approved.
+  KR progress from a metric (the first owner, cycle so far), linked tasks
+  (approved ÷ linked) or the latest monthly check-in (evidence required in
+  the UI). Milestones: owners mark done, the approver confirms. Over 5
+  objectives / 5 KRs, a milestone without a definition of done and a
+  rating weight above 30 % are warnings, never blocks.
+- **Seed**: `pnpm db:seed:kpi` (also run by `pnpm db:seed`) loads
+  `prisma/data/kpi-master.json`, exported from the KPI Master sheet: 24
+  catalogue metrics plus five team / rubric metrics behind "Internal Team"
+  (4 × 15 % team metrics + 40 % rubric), 11 templates, 16 job roles with
+  their templates, 4 rating forms with the sheet's rubrics, and the Q4 2026
+  cycle (empty — the Q4 OKR content wasn't in the sheet). Seeded people
+  without a job role get the one matching their Phase 1 role. Open items
+  kept as defaults: Expert Designer idea targets as in the sheet, Creative
+  Director on Design Core only, Senior Web Developer / Account Lead / HR /
+  Finance with the empty state.
+
+## Phase 2 · M8 Dashboards (2026-10-22)
+
+- **Presets + widgets.** Each role's dashboard stays as its preset (same
+  layout and style). Under it, "For you" (`app/(app)/dashboard/phase2-cards.tsx`,
+  registry `WIDGETS`) adds the widgets that follow responsibilities, worked
+  out per request (`widgetContext`, `lib/dashboard/phase2.ts`): My KPI (has a
+  KPI or tasks — with Task on Time per week, Achieved / Not achieved),
+  Waiting for your review with the SLA countdown (reviewer), Leave vs tasks
+  (runs projects), Team workload (has reports), My OKR (owns objectives),
+  Studio OKR (Studio Report), and from M9 Pipeline (Sales) and Payments to
+  verify (Finance).
+  The `DASHBOARD_PHASE2` flag and its empty slots are gone.
+- **Designer & Developer**: "Your work" — the to-do / kanban from My Tasks
+  (its own `?tasks=` param so it doesn't fight the calendar's `?view=`) and
+  Log time (task or non-billable category) — sits right under the strip.
+- **PM**: a Timeline tab beside the calendar (`?plan=timeline`, twelve weeks
+  from `?from=`): bars in the project's colour, where it stands as a separate
+  badge. The calendar already kept colour (dot) and status (badge) apart.
+- **Leave vs tasks**: open tasks on your projects due while their owner is
+  on approved leave (next 30 days), with Reassign (counts for the new owner)
+  or Move date (reason; the PM's change is approved at once). The New task
+  dialog warns when the due date falls on the owner's leave. People read
+  their own capacity and leave, managers their reports' (RLS widened in
+  `…_m8_dashboard`).
+- **Team workload** reads reports' tasks on the system connection after
+  `app.is_manager_of()` proved the reporting line under RLS — a manager
+  isn't always on their reports' projects.
+- **C-Level**: Studio OKR card; Members avatars show initials
+  (`MemberAvatar name=`). **HR**: attendance-based "Working today",
+  workload labelled and coloured apart from utilization, a link to the
+  KPI & OKR builder.
+
+## Phase 2 · M9 Sales (2026-10-22)
+
+- **Pipeline** (`/sales`, replaces Attio): stages carry a category (Open /
+  Won / Lost) and a default probability; every report counts by category,
+  never by name. The Sales module edits deals and stages, Studio Report
+  reads (`app.has_module`). Kanban by stage (drag, or "Move to" for
+  keyboards) and a list. `deals_derive` stamps the stage date, takes the
+  stage's probability unless the same write sets one, fixes Won at 100 % /
+  Lost at 0 %, needs a lost reason, sets and clears the close date;
+  `deals_history` writes `deal_stage_history` (system only) with the value at
+  each move. A stage with deals can't be deleted, and the pipeline always
+  keeps one stage per category. A deal can be deleted only before it has a
+  project (a lost deal goes to Lost, so it counts in the win rate).
+- **Cards**: total and weighted pipeline in IDR (reference rate, else ECB —
+  `idrRateMap`, `lib/fx.ts`, shared with the Finance dashboard), win rate and average deal length
+  over deals closed in the last 90 days, new leads this month, overdue
+  invoices (same rule as the Sales dashboard's "late": an open invoice with
+  a pending request past due), and stale deals.
+- **Stale** = an open deal in the same stage for more than
+  `sales_stale_days` (default 14, admin setting) — PRD open question.
+- **Won → project**: a prospect is first added as a client (code asked,
+  `createClientFromDeal`); then the project form opens prefilled (name,
+  currency, contract value = deal value) and `createProject(values, dealId)`
+  links the deal in the same transaction — the trigger refuses it unless the
+  deal is won, and the deal's client then stays fixed.
+- **Attio import**: CSV read by column name (Record ID, Deal name, Company,
+  Stage, Value, Currency, Owner, Expected close, Lead source, Service type,
+  Lost reason, Created at, Closed at; others ignored), preview, skip or
+  update by Record ID, under RLS. Companies that aren't clients stay
+  prospects; stages must exist.
+- **Report** (`/sales/report`): candles from `pipeline_snapshots`, written
+  by the `pipeline-snapshot` job at 23:55 WIB — nothing before go-live can be
+  rebuilt. The bridge per month (start + new or reopened − won − lost ±
+  value changes = end) comes from the stage history; "value changes" is
+  the remainder, so the bridge always closes. `pnpm db:seed:sales` loads a
+  demo pipeline with backfilled snapshots — dev only.
+- **Invoices**: type (DP / term / final, optional) and "paid via" (Xendit,
+  bank transfer, Wise, PayPal, other) on the draft. Only Xendit invoices get
+  payment links. The rate to IDR on the issue date is stored at first send
+  (`fx_rate_at_issue`: reference rate, else ECB); a payment's rate is kept
+  with it, and the invoice page shows the FX difference per payment.
+- **Payment proofs**: Sales uploads (PDF / image, private `payment-proofs`
+  bucket) against a sent, unpaid invoice — the invoice reads **Payment
+  submitted** (ahead of Overdue, behind Paid) until Finance decides. Finance
+  verifies (it becomes a `payments` row, `source = proof`, matched to its
+  request, counted as revenue — cash basis) or rejects with a note (back to
+  Sent / Overdue). The guard refuses deciding your own proof, editing a
+  decided one, or changing anything but the decision. Queue: Payments → To
+  verify, and the Finance module's dashboard widget.
+- **Access**: Phase 1 invoice policies stay role-based for writing; the
+  Sales, Finance and Studio Report modules also read invoices and payments.
+
+## Phase 2 · M10 Finance (2026-10-22)
+
+- **The Finance dashboard is operational** (the Finance role's preset,
+  `FinanceDashboard`): what has to be done today. Trends, forecast and
+  margins stay on Finance Overview and the C-Level dashboard. The strip:
+  cash in this month (same as Finance Overview "Received this month":
+  matched payments, settled IDR), receivables due this week (pending
+  requests due Monday–Sunday, IDR estimate), proofs to verify (with the
+  oldest one's age against the PRD's 2-working-day target) and expenses
+  this month. Then the queues — payments to verify, due & late, payments
+  to match, payments received — receivables by client, and the obligations
+  calendar. FN-4 "Outstanding by client" is replaced by the aging table.
+- **Expenses waiting for approval** (PRD card) isn't shown: expenses have
+  no approval step; "Expenses this month" takes its place.
+- **Receivables by client** use the studio aging's buckets (not due, 1–30,
+  31–60, over 60 days late — `agingBucket`), so the per-client table and
+  Finance Overview's aging card always agree. Most late first.
+- **Obligations** (`obligations`, `obligation_completions`): payroll, BPJS,
+  tax, other; monthly on a day (a short month uses its last day), yearly on
+  a day and month, or once. Each occurrence can be ticked done (who, when),
+  and undone. The Finance module keeps every kind; the People module keeps
+  payroll and BPJS (`app.can_manage_obligation`) — the same rows the HR
+  calendar shows (read-only dots), so payroll and BPJS have one source.
+  Studio Report reads. Obligations are switched off, not deleted.
+- **Tax dates** (PRD open question) ship as editable defaults: PPh 21 / 23
+  / 4(2) payment on the 15th, SPT Masa on the 20th, BPJS on the 10th,
+  payroll on the 25th, SPT Tahunan Badan on 30 April. Change them in
+  Dashboard → Obligations → Manage.
+- **Calendar**: obligations and the due dates of unpaid invoice requests
+  (Finance and Studio Report only) on the shared month grid
+  (`?omonth=yyyy-mm`), beside the month as a checklist; past-due items not
+  done read red. "For you" adds Overdue by client (Finance module) and
+  Obligations — next 14 days (Finance or People module) for people outside
+  the Finance role.
+- **FX** was done in M9: rates at issue and at payment, the difference per
+  payment, every report in IDR.
+
+## Sales workspace: Companies, People, invoice stats (2026-10-22)
+
+- **Sales sees a sales-only workspace.** No "For you" under the Sales
+  dashboard, and Work → Projects / Clients are hidden from the Sales role's
+  nav (the pages still exist; Won → project still creates them).
+- **Companies and People** (`/sales/companies`, `/sales/people`, Attio-style)
+  are their own CRM records (`crm_companies`, `crm_people`), not clients: a
+  company can be a prospect, and links to a client when it is one
+  (`client_id`; existing clients and their contacts were copied in). A
+  person may have no company; a company may have no people. The Sales module
+  edits, Studio Report reads (RLS); records and columns are archived, not
+  deleted.
+- **Custom columns** (`crm_attributes`): text, number, currency (IDR), date,
+  checkbox, select, multi-select tags (coloured options), URL, email, phone.
+  Values live in the record's `values` JSON keyed by column id, normalised by
+  `normalizeValue` (`lib/crm/pure.ts`) before they're stored. A column's type
+  is fixed once created (trigger); its name and options can change (an
+  option keeps its id, so values survive a rename). Removing a column hides
+  it; values stay. Cells are edited in place.
+- **Invoice stats** on the list (over the current filters): sent, unpaid
+  (IDR), overdue (IDR), waiting verification, collected (IDR), drafts.

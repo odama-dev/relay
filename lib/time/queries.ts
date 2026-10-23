@@ -99,7 +99,10 @@ export type CorrectionView = {
   reason: string;
   reviewNote: string | null;
   createdAt: Date;
-  summary: string;
+  /** What the request asks for; the screen words it. */
+  kind: "add" | "change" | "remove";
+  minutes: number | null;
+  entryDate: IsoDate | null;
 };
 
 /** M3.4 — a user's week, Monday–Sunday, with per-day totals and missing workdays. */
@@ -168,10 +171,10 @@ export async function getTimesheet(user: CurrentUser, anyDay: IsoDate) {
         reason: c.reason,
         reviewNote: c.reviewNote,
         createdAt: c.createdAt,
-        summary: p.delete
-          ? `Remove entry of ${c.timeEntry ? isoDate(c.timeEntry.entryDate) : "?"}`
-          : `${c.timeEntryId ? "Change" : "Add"} ${p.minutes ?? "?"} min on ${p.entryDate ?? "?"}`,
-      };
+        kind: p.delete ? "remove" : c.timeEntryId ? "change" : "add",
+        minutes: p.delete ? null : (p.minutes ?? null),
+        entryDate: (p.delete ? (c.timeEntry ? isoDate(c.timeEntry.entryDate) : null) : (p.entryDate as IsoDate | undefined)) ?? null,
+      } satisfies CorrectionView;
     }),
   };
 }

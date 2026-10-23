@@ -12,7 +12,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
  *
  * Without Supabase (local DEV_AUTH_BYPASS) files go to ./.data/storage.
  */
-export type Bucket = "task-images" | "invoices" | "receipts";
+export type Bucket = "task-images" | "invoices" | "receipts" | "evidence" | "payment-proofs";
 
 const LOCAL_ROOT = path.join(process.cwd(), ".data", "storage");
 const SIGNED_URL_TTL = 60; // seconds

@@ -170,6 +170,10 @@ export function CardGroupLabel({ label, count, tone }: { label: string; count?: 
   );
 }
 
+/** A side panel's sections, split by a hairline across the whole column (the panel's gutter is undone, then restored). */
+export const panelSections = "-mx-[var(--page-gutter,1rem)] flex flex-col divide-y";
+export const panelSection = "flex flex-col gap-1 px-[var(--page-gutter,1rem)] py-3 first:pt-0";
+
 /** Row style shared by every card list. */
 export const cardRowClass =
   "flex min-h-[34px] min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-body transition-colors duration-80 hover:bg-hover active:bg-active";

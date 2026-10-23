@@ -4,6 +4,7 @@ import { useState } from "react";
 import { requestPasswordReset, signInWithPassword } from "@/app/(auth)/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordField } from "@/components/password-field";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
@@ -95,7 +96,7 @@ export function LoginForm({ className, next }: { className?: string; next?: stri
             Forgot password?
           </button>
         </div>
-        <Input id="password" name="password" type="password" autoComplete="current-password" required />
+        <PasswordField id="password" name="password" autoComplete="current-password" required />
       </div>
       {state.error && <p className="text-destructive text-caption">{state.error}</p>}
       <Button type="submit" disabled={state.loading}>
