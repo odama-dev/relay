@@ -6,12 +6,12 @@ import { toast } from "sonner";
 import type { ClientDetail } from "@/lib/clients/queries";
 import { RowActions } from "@/components/row-actions";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { ClientFormDialog } from "../client-form-dialog";
+import { ClientPanel, useOpenClient } from "@/components/clients/client-panel";
 import { deleteClient, setClientArchived } from "../actions";
 
 export function ClientHeaderActions({ client }: { client: ClientDetail }) {
   const router = useRouter();
-  const [editing, setEditing] = useState(false);
+  const openClient = useOpenClient();
   const [deleting, setDeleting] = useState(false);
 
   return (
@@ -20,7 +20,8 @@ export function ClientHeaderActions({ client }: { client: ClientDetail }) {
         label="Client actions"
         variant="tertiary"
         actions={[
-          { label: "Edit", icon: "edit", onSelect: () => setEditing(true) },
+          // The edit form opens in the client panel, as it does from the list.
+          { label: "Edit", icon: "edit", onSelect: () => openClient(client.id, { edit: true }) },
           {
             label: client.isArchived ? "Restore" : "Archive",
             icon: client.isArchived ? "restore" : "archive",
@@ -34,24 +35,7 @@ export function ClientHeaderActions({ client }: { client: ClientDetail }) {
           { label: "Delete", icon: "delete", destructive: true, hidden: client.hasHistory, onSelect: () => setDeleting(true) },
         ]}
       />
-      <ClientFormDialog
-        open={editing}
-        onOpenChange={setEditing}
-        client={{
-          id: client.id,
-          codeLocked: client.codeLocked,
-          values: {
-            code: client.code,
-            name: client.name,
-            country: client.country ?? "",
-            timezone: client.timezone ?? "",
-            defaultCurrency: client.defaultCurrency as "IDR",
-            billingEmail: client.billingEmail ?? "",
-            billingAddress: client.billingAddress ?? "",
-            notes: client.notes ?? "",
-          },
-        }}
-      />
+      <ClientPanel ids={[client.id]} scope="Clients" />
       <ConfirmDialog
         open={deleting}
         onOpenChange={setDeleting}

@@ -9,6 +9,8 @@ import type { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withRls, type Tx } from "@/lib/db";
 import { proofRejected, proofSubmitted, proofVerified } from "@/lib/invoices/payments";
+import { projectForWonDeal } from "@/lib/sales/won";
+import type { Viewer } from "@/lib/roles";
 
 const ids = { boss: randomUUID(), sales: randomUUID(), fin: randomUUID(), dev: randomUUID(), pm: randomUUID() };
 const as = <T>(user: keyof typeof ids, fn: (tx: Tx) => Promise<T>) => withRls(ids[user], fn);
@@ -37,7 +39,7 @@ beforeAll(async () => {
   for (const [key, role, isAdmin] of people) {
     await prisma.profile.create({ data: { id: ids[key], email: `${key}@m9.test`, fullName: key, role, isAdmin: Boolean(isAdmin), status: "active" } });
   }
-  clientId = (await prisma.client.create({ data: { code: "SALE", name: "Sale Co" } })).id;
+  clientId = (await prisma.client.create({ data: { code: "SAL", name: "Sale Co" } })).id;
   projectId = (
     await prisma.project.create({ data: { name: "Site", kind: "client", clientId, contractType: "fixed", currency: "IDR", pmId: ids.pm, startDate: new Date("2026-10-01") } })
   ).id;
@@ -87,6 +89,36 @@ describe("Pipeline", () => {
     expect(won.probability).toBe(100);
     expect(won.projectId).toBe(projectId);
     expect(await denied(as("sales", (tx) => tx.deal.update({ where: { id: dealId }, data: { clientId: null, prospectName: "Other" } })))).toMatch(/client is fixed/);
+  });
+
+  it("turns a won deal into a client and an Active project, as Sales", async () => {
+    const sales = { id: ids.sales, role: "sales", isAdmin: false, accessLevel: "member", modules: ["sales"] } as unknown as Viewer;
+    const opts = { today: "2026-10-26", thresholds: [80, 100, 80] };
+    const company = await as("sales", (tx) => tx.crmCompany.create({ data: { name: "Kopi Senja" } }));
+    const deal = (title: string, companyId?: string) =>
+      as("sales", async (tx) =>
+        tx.deal.create({ data: { title, prospectName: "Kopi Senja", companyId, value: 50_000_000, stageId: await stage("Proposal") } }),
+      );
+    const first = await deal("Brand refresh", company.id);
+    expect(await as("sales", (tx) => projectForWonDeal(tx, sales, first.id, opts))).toBeNull();
+
+    await as("sales", async (tx) => tx.deal.update({ where: { id: first.id }, data: { stageId: await stage("Won") } }));
+    const made = await as("sales", (tx) => projectForWonDeal(tx, sales, first.id, opts));
+    expect(made?.clientCreated).toBe(true);
+    const client = await prisma.client.findUniqueOrThrow({ where: { id: made!.clientId } });
+    expect([client.code, client.name, client.defaultCurrency]).toEqual(["KS", "Kopi Senja", "IDR"]);
+    const project = await prisma.project.findUniqueOrThrow({ where: { id: made!.id }, include: { contract: true, budget: true } });
+    expect([project.code, project.status, project.contractType, project.pmId]).toEqual(["KS-001", "active", "fixed", ids.boss]);
+    expect(Number(project.contract?.contractValue)).toBe(50_000_000);
+    expect(project.budget?.alertThresholds).toEqual([80, 100]);
+    expect((await prisma.crmCompany.findUniqueOrThrow({ where: { id: company.id } })).clientId).toBe(client.id);
+    expect(await as("sales", (tx) => projectForWonDeal(tx, sales, first.id, opts))).toBeNull();
+
+    // A second deal for the same prospect joins the same client.
+    const second = await deal("Website care");
+    await as("sales", async (tx) => tx.deal.update({ where: { id: second.id }, data: { stageId: await stage("Won") } }));
+    const again = await as("sales", (tx) => projectForWonDeal(tx, sales, second.id, opts));
+    expect([again?.clientId, again?.clientCreated, again?.code]).toEqual([client.id, false, "KS-002"]);
   });
 
   it("keeps stages with deals, and one stage per category", async () => {

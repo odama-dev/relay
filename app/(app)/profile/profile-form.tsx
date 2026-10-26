@@ -8,7 +8,7 @@ import { ownProfileSchema, type OwnProfileInput } from "@/lib/validation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FormField, FormSection, fieldA11y } from "@/components/form-field";
-import { SelectField } from "@/components/select-field";
+import { TimezoneSelect } from "@/components/timezone-select";
 import { CheckField } from "@/components/check-field";
 import { updateOwnProfile } from "./actions";
 
@@ -16,13 +16,11 @@ export function ProfileForm({
   initial,
   email,
   slackLinked,
-  timezones,
   notificationTypes,
 }: {
   initial: OwnProfileInput;
   email: string;
   slackLinked: boolean;
-  timezones: string[];
   notificationTypes: { value: string; label: string }[];
 }) {
   const router = useRouter();
@@ -54,7 +52,7 @@ export function ProfileForm({
               control={control}
               name="timezone"
               render={({ field }) => (
-                <SelectField id="pf-tz" value={field.value} onChange={field.onChange} options={timezones.map((t) => ({ value: t, label: t }))} />
+                <TimezoneSelect id="pf-tz" value={field.value} onChange={field.onChange} />
               )}
             />
           </FormField>

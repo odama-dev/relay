@@ -9,6 +9,10 @@ import { logActivity } from "@/lib/audit";
 import { perms } from "@/lib/roles";
 import { normalizeValue, optionsSchema, type CrmValue } from "@/lib/crm/pure";
 import { getPersonRecord, type PersonRecord } from "@/lib/crm/person-record";
+import { getCompanyRecord, type CompanyRecord } from "@/lib/crm/company-record";
+import { prisma } from "@/lib/prisma";
+import { COUNTRIES } from "@/lib/geo/countries";
+import { parseIsoDate } from "@/lib/time/pure";
 import { CRM_OBJECTS, crmColumnEditSchema, crmColumnSchema, crmCompanySchema, crmFieldSchema, crmNoteEditSchema, crmNoteSchema, crmPersonSchema, uuid } from "@/lib/validation";
 
 /**
@@ -98,14 +102,118 @@ export async function moveColumn(id: unknown, direction: unknown): Promise<Actio
 // Records
 // ---------------------------------------------------------------------------
 
+type CompanyInput = z.output<typeof crmCompanySchema>;
+type PersonInput = z.output<typeof crmPersonSchema>;
+
+const socialData = (d: CompanyInput | PersonInput) => ({
+  angellist: d.angellist ?? null,
+  facebook: d.facebook ?? null,
+  instagram: d.instagram ?? null,
+  linkedin: d.linkedin ?? null,
+  twitter: d.twitter ?? null,
+  twitterFollowers: d.twitterFollowers,
+});
+
+/** The company's own columns; the primary `domain` follows `domains` (crm_companies_lists). */
+const companyData = (d: CompanyInput) => ({
+  name: d.name,
+  domains: d.domains,
+  description: d.description ?? null,
+  country: d.country,
+  categories: d.categories,
+  ...socialData(d),
+  estimatedArr: d.estimatedArr,
+  fundingRaised: d.fundingRaised,
+  fundingCurrency: d.fundingRaised === null ? null : d.fundingCurrency,
+  foundedOn: d.foundedOn ? parseIsoDate(d.foundedOn) : null,
+  employeeRange: d.employeeRange,
+});
+
+/** The person's own columns; the primary `email` / `phone` follow their lists (crm_people_lists). `companyId` is resolved first (resolveCompany). */
+const personData = (d: PersonInput, companyId: string | null) => ({
+  name: d.name,
+  emails: d.emails,
+  phones: d.phones,
+  description: d.description ?? null,
+  companyId,
+  jobTitle: d.jobTitle ?? null,
+  country: d.country,
+  ...socialData(d),
+});
+
+/**
+ * The company's team (people at it) and associated deals. Names typed into
+ * the team become new people at the company, to fill in later on People. A
+ * deal follows its company's client, like the deal form; one with a project
+ * keeps its client (deals_derive), so it neither joins nor leaves. `replace`
+ * drops what was unticked on an edit.
+ */
+async function linkCompany(tx: Prisma.TransactionClient, companyId: string, d: CompanyInput, replace: boolean, ownerId: string) {
+  const company = await tx.crmCompany.findUniqueOrThrow({ where: { id: companyId }, select: { name: true, clientId: true } });
+  if (replace) await tx.crmPerson.updateMany({ where: { companyId, id: { notIn: d.team.ids } }, data: { companyId: null } });
+  if (d.team.ids.length) await tx.crmPerson.updateMany({ where: { id: { in: d.team.ids }, archivedAt: null }, data: { companyId } });
+  if (d.team.names.length) await tx.crmPerson.createMany({ data: d.team.names.map((name) => ({ name, companyId, country: d.country, ownerId })) });
+  if (replace) {
+    const gone = await tx.deal.findMany({ where: { companyId, projectId: null, id: { notIn: d.dealIds } }, select: { id: true, title: true, person: { select: { name: true } } } });
+    for (const g of gone) await tx.deal.update({ where: { id: g.id }, data: { companyId: null, clientId: null, prospectName: g.person?.name ?? g.title } });
+  }
+  if (d.dealIds.length) {
+    await tx.deal.updateMany({
+      where: { id: { in: d.dealIds }, projectId: null },
+      data: { companyId, clientId: company.clientId, prospectName: company.clientId ? null : company.name },
+    });
+  }
+}
+
+/** A person's company: the one picked, or a new one by the name typed (its details are filled in later on Companies). */
+async function resolveCompany(tx: Prisma.TransactionClient, d: PersonInput, ownerId: string): Promise<string | null> {
+  if (!d.company) return null;
+  if (d.company.id !== null) return d.company.id;
+  const c = await tx.crmCompany.create({ data: { name: d.company.name, country: d.country, ownerId }, select: { id: true } });
+  return c.id;
+}
+
+/** The person's associated deals (the deal's contact). */
+async function linkPerson(tx: Prisma.TransactionClient, personId: string, dealIds: string[], replace: boolean) {
+  if (replace) await tx.deal.updateMany({ where: { personId, id: { notIn: dealIds } }, data: { personId: null } });
+  if (dealIds.length) await tx.deal.updateMany({ where: { id: { in: dealIds } }, data: { personId } });
+}
+
+/** Linked deals may now match synced mail (Contacted / Replied move by themselves). */
+async function afterDealLinks(dealIds: string[]) {
+  revalidatePath("/sales");
+  if (dealIds.length) await prisma.$queryRaw`SELECT app.mail_advance_deals(NULL)`;
+}
+
 export async function createCompany(raw: unknown): Promise<ActionResult<{ id: string }>> {
   return run(async () => {
     const user = await salesUser();
     const d = parseOrFail(crmCompanySchema, raw);
-    const c = await asUser(user, (tx) => tx.crmCompany.create({ data: { name: d.name, domain: d.domain ?? null, ownerId: user.id } }));
-    await logActivity({ actorId: user.id, entityType: "crm_company", entityId: c.id, action: "created", metadata: { name: d.name } });
+    const c = await asUser(user, async (tx) => {
+      const c = await tx.crmCompany.create({ data: { ...companyData(d), ownerId: user.id } });
+      await linkCompany(tx, c.id, d, false, user.id);
+      return c;
+    });
+    await logActivity({ actorId: user.id, entityType: "crm_company", entityId: c.id, action: "created", metadata: { name: d.name, team: d.team.ids.length, newPeople: d.team.names.length, deals: d.dealIds.length } });
     revalidateCrm();
+    await afterDealLinks(d.dealIds);
     return { id: c.id };
+  });
+}
+
+export async function updateCompany(id: unknown, raw: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const user = await salesUser();
+    const companyId = parseOrFail(uuid, id);
+    const d = parseOrFail(crmCompanySchema, raw);
+    await asUser(user, async (tx) => {
+      const res = await tx.crmCompany.updateMany({ where: { id: companyId, archivedAt: null }, data: companyData(d) });
+      if (res.count === 0) fail(FORBIDDEN);
+      await linkCompany(tx, companyId, d, true, user.id);
+    });
+    await logActivity({ actorId: user.id, entityType: "crm_company", entityId: companyId, action: "updated", metadata: { name: d.name } });
+    revalidateCrm();
+    await afterDealLinks(d.dealIds);
   });
 }
 
@@ -113,10 +221,31 @@ export async function createPerson(raw: unknown): Promise<ActionResult<{ id: str
   return run(async () => {
     const user = await salesUser();
     const d = parseOrFail(crmPersonSchema, raw);
-    const p = await asUser(user, (tx) => tx.crmPerson.create({ data: { name: d.name, email: d.email ?? null, companyId: d.companyId ?? null, ownerId: user.id } }));
-    await logActivity({ actorId: user.id, entityType: "crm_person", entityId: p.id, action: "created", metadata: { name: d.name } });
+    const p = await asUser(user, async (tx) => {
+      const p = await tx.crmPerson.create({ data: { ...personData(d, await resolveCompany(tx, d, user.id)), ownerId: user.id } });
+      await linkPerson(tx, p.id, d.dealIds, false);
+      return p;
+    });
+    await logActivity({ actorId: user.id, entityType: "crm_person", entityId: p.id, action: "created", metadata: { name: d.name, deals: d.dealIds.length } });
     revalidateCrm();
+    await afterDealLinks(d.dealIds);
     return { id: p.id };
+  });
+}
+
+export async function updatePerson(id: unknown, raw: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const user = await salesUser();
+    const personId = parseOrFail(uuid, id);
+    const d = parseOrFail(crmPersonSchema, raw);
+    await asUser(user, async (tx) => {
+      const res = await tx.crmPerson.updateMany({ where: { id: personId, archivedAt: null }, data: personData(d, await resolveCompany(tx, d, user.id)) });
+      if (res.count === 0) fail(FORBIDDEN);
+      await linkPerson(tx, personId, d.dealIds, true);
+    });
+    await logActivity({ actorId: user.id, entityType: "crm_person", entityId: personId, action: "updated", metadata: { name: d.name } });
+    revalidateCrm();
+    await afterDealLinks(d.dealIds);
   });
 }
 
@@ -125,6 +254,7 @@ const BUILTIN: Record<(typeof CRM_OBJECTS)[number], Record<string, z.ZodType>> =
   company: {
     name: z.string().trim().min(1, "A name is required").max(160),
     domain: z.string().trim().max(200).nullable(),
+    country: z.enum(COUNTRIES).nullable(),
     description: z.string().trim().max(4000).nullable(),
     ownerId: z.string().uuid().nullable(),
   },
@@ -133,6 +263,7 @@ const BUILTIN: Record<(typeof CRM_OBJECTS)[number], Record<string, z.ZodType>> =
     email: z.string().trim().toLowerCase().email("Enter a valid email").nullable(),
     phone: z.string().trim().max(40).nullable(),
     jobTitle: z.string().trim().max(120).nullable(),
+    country: z.enum(COUNTRIES).nullable(),
     companyId: z.string().uuid().nullable(),
     ownerId: z.string().uuid().nullable(),
   },
@@ -250,5 +381,15 @@ export async function loadPersonRecord(personId: unknown): Promise<PersonRecord>
   if (!id.success || !perms.viewPipeline(user)) throw new Error("Person not found");
   const record = await getPersonRecord(user, id.data);
   if (!record) throw new Error("Person not found");
+  return record;
+}
+
+/** The company side panel's data (`?company=<id>` on Companies), read under RLS. */
+export async function loadCompanyRecord(companyId: unknown): Promise<CompanyRecord> {
+  const user = await requireUser();
+  const id = uuid.safeParse(companyId);
+  if (!id.success || !perms.viewPipeline(user)) throw new Error("Company not found");
+  const record = await getCompanyRecord(user, id.data);
+  if (!record) throw new Error("Company not found");
   return record;
 }

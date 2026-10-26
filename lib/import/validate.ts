@@ -1,6 +1,6 @@
 import type { ContractType, EmploymentType, ProjectStatus, RolloverMode, UserRole } from "@prisma/client";
 import { EMPLOYMENT_TYPES, USER_ROLES } from "@/lib/roles";
-import { CONTRACT_TYPES, CURRENCIES, PROJECT_STATUSES, ROLLOVER_MODES } from "@/lib/validation";
+import { CONTRACT_TYPES, CURRENCIES, PROJECT_STATUSES, ROLLOVER_MODES, clientCodeError, isTimeZone } from "@/lib/validation";
 import { isIsoDate } from "@/lib/time/pure";
 import type { CsvRecord } from "./csv";
 
@@ -19,15 +19,6 @@ const NUMBER = /^\d+(\.\d+)?$/; // dot decimal, no thousands separator
 function decide<T>(line: number, key: string, errors: string[], data: T, exists: boolean, mode: ImportMode): ValidatedRow<T> {
   if (errors.length) return { line, key, action: "error", errors };
   return { line, key, action: exists ? (mode === "update" ? "update" : "skip") : "create", errors, data };
-}
-
-function checkTimeZone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en", { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 // --- users.csv -------------------------------------------------------------
@@ -88,7 +79,8 @@ export function validateClients(
     const errors: string[] = [];
     const code = v.code.toUpperCase();
     const existing = ctx.byName.get(v.name);
-    if (!/^[A-Z]{2,6}$/.test(code) || code === "INT") errors.push("code must be 2–6 capital letters (not INT)");
+    // A code set before the 3-letter rule stays valid on its own client.
+    if (code !== existing?.code && clientCodeError(code)) errors.push("code must be 2–3 letters, no numbers (not INT)");
     else if (seenCodes.has(code)) errors.push("code appears twice in the file");
     else {
       const owner = ctx.codes.get(code);
@@ -102,7 +94,7 @@ export function validateClients(
       errors.push("the code can't change: the client already has projects");
     }
     if (!CURRENCIES.includes(v.default_currency as (typeof CURRENCIES)[number])) errors.push(`default_currency must be one of ${CURRENCIES.join(", ")}`);
-    if (v.timezone && !checkTimeZone(v.timezone)) errors.push("timezone is not a valid IANA zone");
+    if (v.timezone && !isTimeZone(v.timezone)) errors.push("timezone is not a valid IANA zone");
     if (v.billing_email && !EMAIL.test(v.billing_email)) errors.push("billing_email is not valid");
     if (v.contact_email && !EMAIL.test(v.contact_email)) errors.push("contact_email is not valid");
     if (!v.contact_name && (v.contact_email || v.contact_title)) errors.push("contact_name is required with contact details");

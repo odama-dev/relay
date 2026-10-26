@@ -38,7 +38,7 @@ beforeAll(async () => {
   for (const [key, role, isAdmin] of people) {
     await prisma.profile.create({ data: { id: ids[key], email: `${key}@sf.test`, fullName: key, role, isAdmin: Boolean(isAdmin), status: "active" } });
   }
-  clientId = (await prisma.client.create({ data: { code: "FEED", name: "Feed Co" } })).id;
+  clientId = (await prisma.client.create({ data: { code: "FED", name: "Feed Co" } })).id;
   projectId = (
     await prisma.project.create({
       data: { name: "Feed site", kind: "client", clientId, contractType: "fixed", currency: "IDR", pmId: ids.pm, startDate: new Date("2026-10-01") },

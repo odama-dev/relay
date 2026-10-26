@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { avgDealDays, funnel, isStale, leadSourceComparison, monthlyCandles, newLeads, normalizeLeadSource, resolveStageName, wonByMonth, openValueAt, pipelineBridge, pipelineTotals, winRate, type DealFacts, type StageMove } from "./pure";
+import { avgDealDays, clientCodeCandidates, funnel, isStale, leadSourceComparison, monthlyCandles, newLeads, normalizeLeadSource, resolveStageName, wonByMonth, openValueAt, pipelineBridge, pipelineTotals, reportPeriod, winRate, type DealFacts, type StageMove } from "./pure";
 
 const deal = (over: Partial<DealFacts>): DealFacts => ({
   category: "open",
@@ -158,5 +158,46 @@ describe("resolveStageName", () => {
     expect(resolveStageName("Lead", stages)).toBe("r");
     expect(resolveStageName("Discovery call", stages)).toBe("cb");
     expect(resolveStageName("Pitching", stages)).toBeUndefined();
+  });
+});
+
+describe("sales report period", () => {
+  const today = "2026-10-26";
+  it("covers whole months ending this month for a preset, 6M by default", () => {
+    expect(reportPeriod({}, today, null)).toEqual({ range: "6m", from: "2026-05-01", to: today });
+    expect(reportPeriod({ range: "3m" }, today, null)).toEqual({ range: "3m", from: "2026-08-01", to: today });
+    expect(reportPeriod({ range: "1y" }, today, null)).toEqual({ range: "1y", from: "2025-11-01", to: today });
+    expect(reportPeriod({ range: "nope" }, today, null).range).toBe("6m");
+  });
+
+  it("starts All time at the first lead's month", () => {
+    expect(reportPeriod({ range: "all" }, today, "2024-03-18")).toEqual({ range: "all", from: "2024-03-01", to: today });
+    expect(reportPeriod({ range: "all" }, today, null).from).toBe("2026-10-01");
+  });
+
+  it("lets a custom range win, ending today when the end is missing or before the start", () => {
+    expect(reportPeriod({ range: "3m", from: "2026-01-10", to: "2026-02-20" }, today, null)).toEqual({ range: "custom", from: "2026-01-10", to: "2026-02-20" });
+    expect(reportPeriod({ from: "2026-01-10", to: "2025-12-01" }, today, null).to).toBe(today);
+  });
+});
+
+describe("clientCodeCandidates", () => {
+  it("starts from the initials, then the first word", () => {
+    const c = clientCodeCandidates("Nusantara Bank");
+    expect(c[0]).toBe("NB");
+    expect(c.slice(1, 3)).toEqual(["NUS", "NU"]);
+  });
+
+  it("uses one word's first letters", () => {
+    expect(clientCodeCandidates("Arunika Ventures Group")[0]).toBe("AVG");
+    expect(clientCodeCandidates("Kopi")[0]).toBe("KOP");
+  });
+
+  it("only returns valid codes, never INT, and always has fallbacks", () => {
+    const c = clientCodeCandidates("Internal 2026");
+    expect(c).not.toContain("INT");
+    expect(c.every((x) => /^[A-Z]{2,3}$/.test(x))).toBe(true);
+    expect(clientCodeCandidates("123").length).toBeGreaterThan(20);
+    expect(new Set(c).size).toBe(c.length);
   });
 });

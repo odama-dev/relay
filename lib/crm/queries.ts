@@ -3,18 +3,29 @@ import type { CrmObject, Prisma, StageCategory } from "@prisma/client";
 import { numOr0 } from "@/lib/money";
 import { asUser, type CurrentUser } from "@/lib/auth";
 import { isoDate, todayIn, type IsoDate } from "@/lib/time/pure";
-import { optionsSchema, type CrmAttributeType, type CrmOption, type CrmValue } from "@/lib/crm/pure";
+import { ARR_RANGES, EMPLOYEE_RANGES, optionsSchema, type ArrRange, type CrmAttributeType, type CrmOption, type CrmValue, type EmployeeRange } from "@/lib/crm/pure";
 
 /** Sales CRM reads (RLS: Sales and Studio Report). Archived records and columns are left out. */
 
 export type CrmColumn = { id: string; name: string; type: CrmAttributeType; options: CrmOption[] };
 export type Ref = { id: string; name: string };
 
-export type CompanyRow = {
+/** Fields the company and person forms share. */
+export type CrmSocials = { angellist: string | null; facebook: string | null; instagram: string | null; linkedin: string | null; twitter: string | null; twitterFollowers: number | null };
+
+export type CompanyRow = CrmSocials & {
   id: string;
   name: string;
   domain: string | null;
+  domains: string[];
   description: string | null;
+  country: string | null;
+  categories: string[];
+  estimatedArr: ArrRange | null;
+  fundingRaised: number | null;
+  fundingCurrency: string | null;
+  foundedOn: IsoDate | null;
+  employeeRange: EmployeeRange | null;
   owner: Ref | null;
   client: Ref | null;
   people: number;
@@ -22,11 +33,15 @@ export type CompanyRow = {
   createdOn: IsoDate;
 };
 
-export type PersonRow = {
+export type PersonRow = CrmSocials & {
   id: string;
   name: string;
   email: string | null;
+  emails: string[];
   phone: string | null;
+  phones: string[];
+  description: string | null;
+  country: string | null;
   jobTitle: string | null;
   company: Ref | null;
   owner: Ref | null;
@@ -41,6 +56,16 @@ async function columns(user: CurrentUser, object: CrmObject): Promise<CrmColumn[
 
 const valuesOf = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, CrmValue>) : {});
 const ref = (p: { id: string; fullName: string } | null) => (p ? { id: p.id, name: p.fullName } : null);
+const socials = (r: CrmSocials) => ({
+  angellist: r.angellist,
+  facebook: r.facebook,
+  instagram: r.instagram,
+  linkedin: r.linkedin,
+  twitter: r.twitter,
+  twitterFollowers: r.twitterFollowers,
+});
+const arrRange = (v: string | null) => ((ARR_RANGES as readonly string[]).includes(v ?? "") ? (v as ArrRange) : null);
+const employeeRange = (v: string | null) => ((EMPLOYEE_RANGES as readonly string[]).includes(v ?? "") ? (v as EmployeeRange) : null);
 
 export async function loadCompanies(user: CurrentUser) {
   const [cols, rows] = await Promise.all([
@@ -64,7 +89,16 @@ export async function loadCompanies(user: CurrentUser) {
         id: c.id,
         name: c.name,
         domain: c.domain,
+        domains: c.domains,
         description: c.description,
+        country: c.country,
+        categories: c.categories,
+        estimatedArr: arrRange(c.estimatedArr),
+        fundingRaised: c.fundingRaised === null ? null : numOr0(c.fundingRaised),
+        fundingCurrency: c.fundingCurrency,
+        foundedOn: c.foundedOn ? isoDate(c.foundedOn) : null,
+        employeeRange: employeeRange(c.employeeRange),
+        ...socials(c),
         owner: ref(c.owner),
         client: c.client,
         people: c._count.people,
@@ -95,8 +129,13 @@ export async function loadPeople(user: CurrentUser) {
         id: p.id,
         name: p.name,
         email: p.email,
+        emails: p.emails,
         phone: p.phone,
+        phones: p.phones,
+        description: p.description,
+        country: p.country,
         jobTitle: p.jobTitle,
+        ...socials(p),
         company: p.company && !p.company.archivedAt ? { id: p.company.id, name: p.company.name } : null,
         owner: ref(p.owner),
         values: valuesOf(p.values),
@@ -115,6 +154,33 @@ export async function crmOptions(user: CurrentUser): Promise<{ people: CrmPerson
     people: await tx.crmPerson.findMany({ where: { archivedAt: null }, orderBy: { name: "asc" }, select: { id: true, name: true, email: true, companyId: true } }),
     companies: await tx.crmCompany.findMany({ where: { archivedAt: null }, orderBy: { name: "asc" }, select: { id: true, name: true, domain: true } }),
   }));
+}
+
+export type CrmFormOptions = {
+  people: CrmPersonOption[];
+  companies: CrmCompanyOption[];
+  /** Deals to associate; one with a project keeps its client, so it can't move (`locked`). */
+  deals: { id: string; title: string; companyId: string | null; personId: string | null; locked: boolean }[];
+  /** Categories already used on companies, to pick from. */
+  categories: string[];
+};
+
+/** What the company and person forms pick from (Sales / Studio Report under RLS). */
+export async function crmFormOptions(user: CurrentUser): Promise<CrmFormOptions> {
+  return asUser(user, async (tx) => {
+    const [people, companies, deals, categories] = await Promise.all([
+      tx.crmPerson.findMany({ where: { archivedAt: null }, orderBy: { name: "asc" }, select: { id: true, name: true, email: true, companyId: true } }),
+      tx.crmCompany.findMany({ where: { archivedAt: null }, orderBy: { name: "asc" }, select: { id: true, name: true, domain: true } }),
+      tx.deal.findMany({ orderBy: [{ leadDate: "desc" }, { createdAt: "desc" }], select: { id: true, title: true, companyId: true, personId: true, projectId: true } }),
+      tx.$queryRaw<{ category: string }[]>`SELECT DISTINCT unnest(categories) AS category FROM public.crm_companies WHERE archived_at IS NULL ORDER BY 1`,
+    ]);
+    return {
+      people,
+      companies,
+      deals: deals.map((d) => ({ id: d.id, title: d.title, companyId: d.companyId, personId: d.personId, locked: d.projectId !== null })),
+      categories: categories.map((c) => c.category),
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

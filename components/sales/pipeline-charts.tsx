@@ -1,7 +1,7 @@
 "use client";
 
-import { Bar, BarChart, CartesianGrid, Cell, LabelList, Tooltip, XAxis, YAxis } from "recharts";
-import type { Bridge, Candle } from "@/lib/sales/pure";
+import { Bar, BarChart, CartesianGrid, Cell, LabelList, Pie, PieChart, Tooltip, XAxis, YAxis } from "recharts";
+import type { Candle } from "@/lib/sales/pure";
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -91,136 +91,99 @@ export function CandleChart({ data, height = 240, className }: { data: (Candle &
   );
 }
 
-/**
- * Pipeline bridge (waterfall) for one month: start, + new, − won, − lost,
- * ± value changes, = end. Totals are solid; steps float from where the
- * previous one ended, additions in the "in" tone, removals in the "out" tone.
- */
-export function BridgeChart({ bridge, height = 240, className }: { bridge: Bridge; height?: number; className?: string }) {
-  const step = (name: string, from: number, delta: number) => ({
-    name,
-    range: [Math.min(from, from + delta), Math.max(from, from + delta)] as [number, number],
-    value: delta,
-    kind: delta >= 0 ? "in" : "out",
-  });
-  const afterNew = bridge.start + bridge.added;
-  const afterWon = afterNew - bridge.won;
-  const afterLost = afterWon - bridge.lost;
-  const rows = [
-    { name: "Start", range: [0, bridge.start] as [number, number], value: bridge.start, kind: "total" },
-    step("New", bridge.start, bridge.added),
-    step("Won", afterNew, -bridge.won),
-    step("Lost", afterWon, -bridge.lost),
-    step("Value changes", afterLost, bridge.adjusted),
-    { name: "End", range: [0, bridge.end] as [number, number], value: bridge.end, kind: "total" },
-  ];
-  const color = (kind: string) => (kind === "total" ? "var(--chart-1)" : kind === "in" ? "var(--chart-in)" : "var(--chart-out)");
-  const config: ChartConfig = { range: { label: "Pipeline", color: "var(--chart-1)" } };
-  return (
-    <figure className={cn("flex flex-col gap-2", className)}>
-      <Legend
-        items={[
-          { label: "Pipeline value", color: "var(--chart-1)" },
-          { label: "Added", color: "var(--chart-in)" },
-          { label: "Taken out", color: "var(--chart-out)" },
-        ]}
-      />
-      <ChartContainer config={config} className="aspect-auto w-full" style={{ height }}>
-        <BarChart data={rows} margin={{ top: 20, right: 4, bottom: 0, left: 0 }} barCategoryGap="28%">
-          <CartesianGrid vertical={false} stroke="var(--border)" />
-          <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} interval={0} />
-          <YAxis tickLine={false} axisLine={false} width={56} tickFormatter={axis} />
-          <Tooltip
-            cursor={{ fill: "var(--muted)", opacity: 0.4 }}
-            content={({ active, payload }) => {
-              if (!active || !payload?.length) return null;
-              const r = payload[0]!.payload as (typeof rows)[number];
-              return <TooltipBox title={r.name} rows={[[r.kind === "total" ? "Open pipeline" : r.value >= 0 ? "Added" : "Taken out", idr(Math.abs(r.value))]]} />;
-            }}
-          />
-          <Bar dataKey="range" maxBarSize={36} radius={4} isAnimationActive={false}>
-            {rows.map((r, i) => (
-              <Cell key={i} fill={color(r.kind)} />
-            ))}
-            <LabelList
-              dataKey="value"
-              position="top"
-              className="fill-muted-foreground text-caption"
-              formatter={(v: unknown) => (typeof v === "number" && v !== 0 ? `${v < 0 ? "−" : ""}${axis(Math.abs(v))}` : "")}
-            />
-          </Bar>
-        </BarChart>
-      </ChartContainer>
-    </figure>
-  );
-}
-
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+/** Band height (of 100) for a step: the first step fills most of the column, an empty one keeps a sliver. */
+const bandHeight = (deals: number, top: number) => (top > 0 ? 6 + 74 * (deals / top) : 6);
+
+/** One column's slice of the flow: flat at its own height, then an S-curve down to the next step's. */
+function bandPath(from: number, to: number) {
+  const t0 = 50 - from / 2;
+  const t1 = 50 - to / 2;
+  const b0 = 50 + from / 2;
+  const b1 = 50 + to / 2;
+  return `M0,${t0} L35,${t0} C50,${t0} 50,${t1} 65,${t1} L100.6,${t1} L100.6,${b1} L65,${b1} C50,${b1} 50,${b0} 35,${b0} L0,${b0} Z`;
+}
+
 /**
- * Horizontal funnel: deals that reached each step, one blue, each bar
- * labelled with its count and the share of the first step.
+ * Funnel as a flow: one column per step with its name, deals and value on
+ * top, and a band below whose height is the deals that reached it, easing
+ * into the next step. Deeper steps are a deeper blue (solid mixes, so slices meet without seams); hover or focus marks
+ * a column with a blue left line and deepens its band. Percentages are of the first step.
  */
 export function FunnelChart({ steps, className }: { steps: { label: string; deals: number; valueIdr: number }[]; className?: string }) {
   const top = steps[0]?.deals ?? 0;
-  const rows = steps.map((s) => ({ ...s, label2: `${s.deals}${top > 0 && s !== steps[0] ? ` · ${Math.round((s.deals / top) * 100)}%` : ""}` }));
-  const config: ChartConfig = { deals: { label: "Deals", color: "var(--chart-in)" } };
+  const last = Math.max(1, steps.length - 1);
   return (
-    <figure className={cn("flex flex-col gap-2", className)}>
-      <ChartContainer config={config} className="aspect-auto w-full" style={{ height: Math.max(120, rows.length * 52) }}>
-        <BarChart data={rows} layout="vertical" margin={{ top: 0, right: 72, bottom: 0, left: 0 }} barCategoryGap="22%">
-          <XAxis type="number" hide domain={[0, Math.max(1, top)]} />
-          <YAxis type="category" dataKey="label" tickLine={false} axisLine={false} width={104} />
-          <Tooltip
-            cursor={{ fill: "var(--muted)", opacity: 0.4 }}
-            content={({ active, payload }) => {
-              if (!active || !payload?.length) return null;
-              const r = payload[0]!.payload as (typeof rows)[number];
-              return (
-                <TooltipBox
-                  title={r.label}
-                  rows={[
-                    ["Deals", String(r.deals)],
-                    ["Of the first step", top > 0 ? `${Math.round((r.deals / top) * 100)}%` : "—"],
-                    ["Value", idr(r.valueIdr)],
-                  ]}
-                />
-              );
-            }}
-          />
-          <Bar dataKey="deals" fill="var(--chart-in)" radius={4} maxBarSize={32} isAnimationActive={false}>
-            <LabelList dataKey="label2" position="right" className="fill-muted-foreground text-caption" />
-          </Bar>
-        </BarChart>
-      </ChartContainer>
+    <figure className={cn("-mx-1 flex overflow-x-auto", className)}>
+      {steps.map((s, i) => {
+        const h = bandHeight(s.deals, top);
+        const next = bandHeight(steps[i + 1]?.deals ?? s.deals, top);
+        const share = top > 0 ? Math.round((s.deals / top) * 100) : 0;
+        return (
+          <div
+            key={s.label}
+            tabIndex={0}
+            aria-label={`${s.label}: ${count(s.deals, "deal")}, ${share}% of the first step, ${idr(s.valueIdr)}`}
+            className="group flex min-w-28 flex-1 flex-col outline-none"
+            style={{ "--band": `color-mix(in oklch, var(--chart-in) ${Math.round(18 + 72 * (i / last))}%, var(--surface-3))` } as React.CSSProperties}
+          >
+            <div className={cn("group-hover:border-chart-in group-focus-visible:border-chart-in flex flex-col gap-0.5 border-l px-3 pt-2.5 pb-3 transition-colors duration-150", i === 0 && "border-transparent")}>
+              <span className="text-muted-foreground truncate text-caption uppercase tracking-wide">{s.label}</span>
+              <span className="tabular text-[20px] leading-tight font-medium">{s.deals}</span>
+              <span className="text-muted-foreground tabular truncate text-caption">{axis(s.valueIdr)}</span>
+            </div>
+            <div className="relative min-h-40 flex-1">
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 size-full overflow-hidden" aria-hidden>
+                {/* The pale halo is a fixed-width stroke, so it stays thin however tall the card is. */}
+                <path d={bandPath(h, next)} vectorEffect="non-scaling-stroke" strokeWidth={12} strokeLinejoin="round" style={{ fill: "none", stroke: "color-mix(in oklch, var(--chart-in) 7%, var(--surface-3))" }} />
+                <path d={bandPath(h, next)} className="group-hover:fill-chart-in group-focus-visible:fill-chart-in transition-[fill] duration-150 [fill:var(--band)]" />
+              </svg>
+              <span className="text-muted-foreground tabular absolute right-2 text-caption" style={{ bottom: `calc(${50 + h / 2}% + 10px)` }}>
+                {share}%
+              </span>
+            </div>
+          </div>
+        );
+      })}
     </figure>
   );
 }
 
-/** Lead sources side by side: leads in gray, won in blue; win rate in the tooltip and the label. */
+const blue = (pct: number) => `color-mix(in oklch, var(--chart-in) ${pct}%, var(--surface-3))`;
+
+/**
+ * Fixed blue shade per source (colour follows the source, not its rank);
+ * neighbouring sources sit far apart on the ramp, and the legend carries the
+ * counts so identity never rests on shade alone.
+ */
+const SOURCE_COLOR: Record<string, string> = {
+  dribbble: blue(100),
+  referral: blue(40),
+  website: blue(75),
+  other: blue(20),
+  email: blue(55),
+  behance: blue(88),
+  contra: blue(30),
+  unknown: blue(10),
+};
+
+/** Lead sources as a pie of leads; the legend carries each source's count and win rate, the tooltip the rest. */
 export function SourceChart({
   rows,
   className,
 }: {
-  rows: { label: string; leads: number; won: number; lost: number; winRate: number | null; wonIdr: number }[];
+  rows: { source: string; label: string; leads: number; won: number; lost: number; winRate: number | null; wonIdr: number }[];
   className?: string;
 }) {
-  const data = [...rows].sort((a, b) => b.leads - a.leads).map((r) => ({ ...r, rate: r.winRate === null ? "" : `${r.winRate}% won` }));
-  const config: ChartConfig = { leads: { label: "Leads", color: "var(--chart-3)" }, won: { label: "Won", color: "var(--chart-in)" } };
+  const data = [...rows].sort((a, b) => b.leads - a.leads);
+  const total = data.reduce((s, r) => s + r.leads, 0);
+  const config: ChartConfig = { leads: { label: "Leads", color: "var(--chart-in)" } };
   return (
-    <figure className={cn("flex flex-col gap-2", className)}>
-      <Legend
-        items={[
-          { label: "Leads", color: "var(--chart-3)" },
-          { label: "Won", color: "var(--chart-in)" },
-        ]}
-      />
-      <ChartContainer config={config} className="aspect-auto w-full" style={{ height: Math.max(140, data.length * 48) }}>
-        <BarChart data={data} layout="vertical" margin={{ top: 0, right: 72, bottom: 0, left: 0 }} barGap={2} barCategoryGap="24%">
-          <XAxis type="number" hide allowDecimals={false} />
-          <YAxis type="category" dataKey="label" tickLine={false} axisLine={false} width={136} />
+    <figure className={cn("flex flex-col justify-center gap-3", className)}>
+      <ChartContainer config={config} className="aspect-auto min-h-36 w-full flex-1">
+        <PieChart>
           <Tooltip
-            cursor={{ fill: "var(--muted)", opacity: 0.4 }}
             content={({ active, payload }) => {
               if (!active || !payload?.length) return null;
               const r = payload[0]!.payload as (typeof data)[number];
@@ -228,7 +191,7 @@ export function SourceChart({
                 <TooltipBox
                   title={r.label}
                   rows={[
-                    ["Leads", String(r.leads)],
+                    ["Leads", `${r.leads} · ${Math.round((r.leads / total) * 100)}%`],
                     ["Won", String(r.won)],
                     ["Lost", String(r.lost)],
                     ["Win rate (closed)", r.winRate === null ? "—" : `${r.winRate}%`],
@@ -238,12 +201,23 @@ export function SourceChart({
               );
             }}
           />
-          <Bar dataKey="leads" fill="var(--chart-3)" radius={4} maxBarSize={14} isAnimationActive={false} />
-          <Bar dataKey="won" fill="var(--chart-in)" radius={4} maxBarSize={14} isAnimationActive={false}>
-            <LabelList dataKey="rate" position="right" className="fill-muted-foreground text-caption" />
-          </Bar>
-        </BarChart>
+          <Pie data={data} dataKey="leads" nameKey="label" outerRadius="100%" stroke="var(--surface-3)" strokeWidth={2} isAnimationActive={false}>
+            {data.map((r) => (
+              <Cell key={r.source} fill={SOURCE_COLOR[r.source] ?? blue(30)} />
+            ))}
+          </Pie>
+        </PieChart>
       </ChartContainer>
+      <figcaption className="flex flex-col gap-1 text-caption">
+        {data.map((r) => (
+          <span key={r.source} className="flex items-center gap-2">
+            <span className="size-2.5 shrink-0 rounded-[3px]" style={{ background: SOURCE_COLOR[r.source] ?? blue(30) }} aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{r.label}</span>
+            <span className="tabular">{r.leads}</span>
+            <span className="text-muted-foreground tabular w-14 text-right">{r.winRate === null ? "—" : `${r.winRate}% won`}</span>
+          </span>
+        ))}
+      </figcaption>
     </figure>
   );
 }

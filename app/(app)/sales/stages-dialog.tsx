@@ -14,10 +14,13 @@ import { cn } from "@/lib/utils";
 import { StatusDot } from "@/components/status-badge";
 import { icons } from "@/components/icon";
 import { createStage, deleteStage, moveStage, setStageHidden, updateStage } from "./actions";
+import type { OptionColor } from "@/lib/crm/pure";
+import { badgeColors } from "@/components/ui/badge";
+import { ColorDots } from "@/components/crm/column-dialog";
 
 type Category = (typeof STAGE_CATEGORIES)[number];
 const CATEGORY_LABEL: Record<Category, string> = { open: "Open", won: "Won", lost: "Lost" };
-type Draft = { name: string; category: Category; probability: number };
+type Draft = { name: string; category: Category; probability: number; color: OptionColor | null };
 
 /**
  * Pipeline stages (Sales module): name, category and default probability,
@@ -27,7 +30,7 @@ type Draft = { name: string; category: Category; probability: number };
 export function StagesDialog({ stages, onClose }: { stages: StageView[]; onClose: () => void }) {
   const router = useRouter();
   const [editing, setEditing] = useState<string | "new" | null>(null);
-  const [draft, setDraft] = useState<Draft>({ name: "", category: "open", probability: 50 });
+  const [draft, setDraft] = useState<Draft>({ name: "", category: "open", probability: 50, color: null });
   const [busy, setBusy] = useState(false);
 
   const act = async (fn: () => Promise<{ ok: boolean; error?: string }>, done?: string) => {
@@ -67,7 +70,16 @@ export function StagesDialog({ stages, onClose }: { stages: StageView[]; onClose
         value={draft.probability}
         onChange={(e) => setDraft({ ...draft, probability: Number(e.target.value) })}
       />
-      <span className="flex gap-1">
+      <span className="col-span-full flex items-center gap-2">
+        <span className="text-muted-foreground text-caption">Dot</span>
+        <ColorDots value={draft.color} onChange={(color) => setDraft({ ...draft, color })} />
+        {draft.color && (
+          <Button type="button" size="sm" variant="ghost" onClick={() => setDraft({ ...draft, color: null })}>
+            Category colour
+          </Button>
+        )}
+      </span>
+      <span className="col-start-4 row-start-1 flex gap-1">
         <Button type="submit" size="sm" disabled={busy || !draft.name.trim()}>
           Save
         </Button>
@@ -91,14 +103,21 @@ export function StagesDialog({ stages, onClose }: { stages: StageView[]; onClose
               <li key={s.id}>{form(s.id)}</li>
             ) : (
               <li key={s.id} className="hover:bg-accent/40 flex h-10 items-center gap-3 rounded-lg px-2">
-                <StatusDot value={s.category} label={CATEGORY_LABEL[s.category]} />
+                {s.color ? (
+                  <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: badgeColors[s.color] }} />
+                ) : (
+                  <StatusDot value={s.category} label={CATEGORY_LABEL[s.category]} />
+                )}
                 <span className={cn("min-w-0 flex-1 truncate font-medium", s.isHidden && "text-muted-foreground")}>
                   {s.name}
                   {s.isHidden && <span className="text-caption font-normal"> · Hidden</span>}
                   {s.autoKey && (
-                    <span className="text-muted-foreground text-caption font-normal">
+                    <span
+                      className="text-muted-foreground text-caption font-normal"
+                      title={s.autoKey === "contacted" ? "Moves here when you email the deal's person or company" : "Moves here when they reply to your email"}
+                    >
                       {" "}
-                      · Auto from email ({s.autoKey === "contacted" ? "you wrote" : "they replied"})
+                      · Auto
                     </span>
                   )}
                 </span>
@@ -112,7 +131,7 @@ export function StagesDialog({ stages, onClose }: { stages: StageView[]; onClose
                       label: "Edit",
                       icon: "edit",
                       onSelect: () => {
-                        setDraft({ name: s.name, category: s.category, probability: s.probability });
+                        setDraft({ name: s.name, category: s.category, probability: s.probability, color: s.color });
                         setEditing(s.id);
                       },
                     },
@@ -138,7 +157,7 @@ export function StagesDialog({ stages, onClose }: { stages: StageView[]; onClose
               size="sm"
               leadingIcon={icons.add}
               onClick={() => {
-                setDraft({ name: "", category: "open", probability: 50 });
+                setDraft({ name: "", category: "open", probability: 50, color: null });
                 setEditing("new");
               }}
             >

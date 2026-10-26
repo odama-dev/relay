@@ -262,7 +262,10 @@ function Combobox<
     onCreateRef.current = onCreate;
   });
   const handleValueChange = useCallback(
-    (next: T[] | T | null) => {
+    (next: T[] | T | null, details?: { reason?: string }) => {
+      // Base UI clears the whole selection on Escape with the popup closed;
+      // in a chips field that drops every chip, so Escape only closes there.
+      if (isMultiple && details?.reason === "escape-key") return;
       const picked = Array.isArray(next) ? next : next == null ? [] : [next];
       const created = picked.find(isCreateItem);
       let nextValues = picked.filter((item) => !isCreateItem(item)).map(itemValue);
@@ -379,7 +382,9 @@ const ALWAYS_HIGHLIGHT = "always" as unknown as boolean;
 
 const fieldVariants = cva(
   [
-    "group flex items-center ring-1 cursor-text",
+    // An inset ring sits inside the box, like an Input's border, so the
+    // field is the ladder height on screen (28 / 36px), not 2px taller.
+    "group flex items-center ring-1 ring-inset cursor-text",
     "transition-all duration-80",
     "data-[disabled]:opacity-50 data-[disabled]:pointer-events-none",
   ],
@@ -513,7 +518,8 @@ const ComboboxInput = forwardRef<HTMLInputElement, ComboboxInputProps>(
             fieldVariants({ variant }),
             sizeClasses.control,
             sizeClasses.gap,
-            compact ? "px-2" : "px-2.5",
+            // An Input's padding plus its 1px border (the ring here takes no room), so text lines up across fields.
+            compact ? "px-[11px]" : "px-[13px]",
             compact ? "min-w-[128px]" : "min-w-[160px]",
             shape.input,
             error && "ring-destructive/50 hover:ring-destructive/50 focus-within:ring-destructive/50",
@@ -646,7 +652,8 @@ const ComboboxChips = forwardRef<HTMLInputElement, ComboboxChipsProps>(
             "!items-start",
             compact ? "min-h-7 py-1" : "min-h-9 py-1.5",
             sizeClasses.gap,
-            compact ? "px-2" : "px-2.5",
+            // An Input's padding plus its 1px border (the ring here takes no room), so text lines up across fields.
+            compact ? "px-[11px]" : "px-[13px]",
             compact ? "min-w-[128px]" : "min-w-[160px]",
             shape.input,
             error && "ring-destructive/50 hover:ring-destructive/50 focus-within:ring-destructive/50",
@@ -674,7 +681,8 @@ const ComboboxChips = forwardRef<HTMLInputElement, ComboboxChipsProps>(
               // drag the caret with it; the row snaps instead, in the same
               // frame as the chip. An icon keeps the full inset — it leads,
               // not the chip.
-              !Icon && values.length > 0 && "-ml-1"
+              // 11px inset less the 4px (6px default) vertical gap → -7px in both sizes.
+              !Icon && values.length > 0 && "-ml-[7px]"
             )}
           >
             <ComboboxPrimitive.Value>

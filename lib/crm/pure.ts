@@ -122,3 +122,57 @@ export function connectionStrength(mail: { sentAt: string; direction: "inbound" 
   if (within(365).length > 0) return "weak";
   return "none";
 }
+
+/** Company size and revenue ranges (checked in crm_companies_employee_range / _estimated_arr). */
+export const EMPLOYEE_RANGES = ["1-10", "11-50", "51-200", "201-500", "501-1k", "1k-5k", "5k-10k", "10k-50k", "50k+"] as const;
+export type EmployeeRange = (typeof EMPLOYEE_RANGES)[number];
+export const EMPLOYEE_RANGE_LABELS: Record<EmployeeRange, string> = {
+  "1-10": "1–10",
+  "11-50": "11–50",
+  "51-200": "51–200",
+  "201-500": "201–500",
+  "501-1k": "501–1,000",
+  "1k-5k": "1,000–5,000",
+  "5k-10k": "5,000–10,000",
+  "10k-50k": "10,000–50,000",
+  "50k+": "50,000+",
+};
+
+export const ARR_RANGES = ["0-1m", "1m-10m", "10m-50m", "50m-100m", "100m-250m", "250m-500m", "500m-1b", "1b-10b", "10b+"] as const;
+export type ArrRange = (typeof ARR_RANGES)[number];
+export const ARR_RANGE_LABELS: Record<ArrRange, string> = {
+  "0-1m": "$0–$1M",
+  "1m-10m": "$1M–$10M",
+  "10m-50m": "$10M–$50M",
+  "50m-100m": "$50M–$100M",
+  "100m-250m": "$100M–$250M",
+  "250m-500m": "$250M–$500M",
+  "500m-1b": "$500M–$1B",
+  "1b-10b": "$1B–$10B",
+  "10b+": "$10B+",
+};
+
+/** In the order the forms list them. */
+export const SOCIALS = ["angellist", "facebook", "instagram", "linkedin", "twitter"] as const;
+export type Social = (typeof SOCIALS)[number];
+export const SOCIAL_LABELS: Record<Social, string> = { linkedin: "LinkedIn", twitter: "Twitter", instagram: "Instagram", facebook: "Facebook", angellist: "AngelList" };
+const SOCIAL_HOSTS: Record<Social, string> = { linkedin: "linkedin.com/in/", twitter: "x.com/", instagram: "instagram.com/", facebook: "facebook.com/", angellist: "wellfound.com/u/" };
+
+/** A social profile as a link: a full URL stays, a handle ("@kopisenja") becomes the network's profile URL. */
+export function socialHref(network: Social, value: string): string {
+  const v = value.trim();
+  if (/^https?:\/\//i.test(v)) return v;
+  if (/^[\w.-]+\.[a-z]{2,}\//i.test(v)) return `https://${v}`;
+  return `https://${SOCIAL_HOSTS[network]}${v.replace(/^@/, "")}`;
+}
+
+/** "https://www.Kopi-Senja.id/about" → "kopi-senja.id"; null when it isn't a domain. */
+export function normalizeDomain(raw: string): string | null {
+  const d = raw
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/[/?#].*$/, "");
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(d) ? d : null;
+}

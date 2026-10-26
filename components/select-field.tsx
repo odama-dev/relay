@@ -9,7 +9,9 @@ const NONE = "__none";
 
 /**
  * The form select: options in, value out. `noneLabel` adds an empty choice
- * that maps to "" (e.g. "Unassigned"). Pass the FormField a11y props through.
+ * that maps to "" (e.g. "Unassigned"). Its height follows the surrounding
+ * size (compact in the app), like Input; `size` pins it. Pass the FormField
+ * a11y props through.
  */
 export function SelectField({
   value,
@@ -18,7 +20,7 @@ export function SelectField({
   placeholder = "Select…",
   noneLabel,
   disabled,
-  size = "default",
+  size,
   className,
   ...a11y
 }: {

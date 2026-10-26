@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { DndContext, DragOverlay } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { toast } from "sonner";
 import type { DealView } from "@/lib/sales/queries";
 import { formatDateShort, formatMoney } from "@/lib/format";
 import { KanbanColumn } from "@/components/kanban-column";
@@ -19,28 +18,27 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FormField } from "@/components/form-field";
 import { moveDeal } from "./actions";
-import type { SalesChoices } from "./deal-dialog";
+import { toastWon, type SalesChoices } from "./deal-form";
+import { badgeColors } from "@/components/ui/badge";
 
 type Item = DealView & { status: string; boardOrder: number };
 type Result = { ok: true } | { ok: false; error: string };
 
 /**
  * The pipeline as a board: one column per stage, in the stages' order.
- * Dragging a deal changes its stage; Lost asks why; Won offers the project.
+ * Dragging a deal changes its stage; Lost asks why; Won makes the client and
+ * project (moveDeal) and offers the first invoice.
  * Columns show the IDR total of their deals.
  */
 export function PipelineBoard({
   deals,
   choices,
   onOpen,
-  onEdit,
 }: {
   deals: DealView[];
   choices: SalesChoices;
   /** A card opens the deal panel. */
   onOpen: (id: string) => void;
-  /** Opens the deal dialog (e.g. to create the project once won). */
-  onEdit: (id: string) => void;
 }) {
   const router = useRouter();
   const dropAnimation = useKanbanDropAnimation();
@@ -71,9 +69,7 @@ export function PipelineBoard({
     const res = await moveDeal(id, { stageId, lostReason });
     if (!res.ok) return res;
     router.refresh();
-    if (stage?.category === "won" && !deal?.project && choices.canCreateProject) {
-      toast.success(`${deal?.title ?? "Deal"} won`, { action: { label: "Create project", onClick: () => onEdit(id) } });
-    }
+    if (res.data.project) toastWon(res.data, "", choices, router.push);
     return { ok: true };
   };
 
@@ -97,6 +93,7 @@ export function PipelineBoard({
               key={stage.id}
               status={stage.id}
               tone={stage.category}
+              color={stage.color ? badgeColors[stage.color] : undefined}
               label={stage.name}
               itemIds={ids}
               isTarget={target === stage.id}

@@ -35,6 +35,28 @@ export function daysLate(due: IsoDate, today: IsoDate): number {
   return Math.max(0, Math.round((parseIsoDate(today).getTime() - parseIsoDate(due).getTime()) / 86_400_000));
 }
 
+/** A client's payment status: from its pending requests, or set by hand. "none": no open request to judge. */
+export type ClientPaymentState = "late" | "due_soon" | "on_track" | "none";
+
+export const CLIENT_PAYMENT_LABELS: Record<ClientPaymentState, string> = {
+  late: "Late",
+  due_soon: "Due soon",
+  on_track: "On track",
+  none: "No open invoice",
+};
+
+/**
+ * A client's payment status from its open (pending) requests: late if any is
+ * late, else due soon if any is, else on track; none without open requests.
+ * A status set by hand wins.
+ */
+export function clientPaymentState(dueStates: (DueState | null)[], manual?: Exclude<ClientPaymentState, "none"> | null): ClientPaymentState {
+  if (manual) return manual;
+  if (dueStates.includes("late")) return "late";
+  if (dueStates.includes("due_soon")) return "due_soon";
+  return dueStates.length ? "on_track" : "none";
+}
+
 /** Overdue: past due and not Done. */
 export function isOverdue(task: { dueDate: IsoDate | null; status: string }, today: IsoDate): boolean {
   return Boolean(task.dueDate && task.dueDate < today && task.status !== "done");

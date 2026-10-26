@@ -25,7 +25,6 @@ export default async function ProfilePage() {
         }}
         email={profile.email}
         slackLinked={Boolean(profile.slackUserId)}
-        timezones={Intl.supportedValuesOf("timeZone")}
         notificationTypes={MUTABLE_NOTIFICATION_TYPES.map((t) => ({ value: t, label: NOTIFICATION_TYPES[t] }))}
       />
     </div>

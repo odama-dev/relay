@@ -471,12 +471,13 @@
     font-variant-numeric: tabular-nums;
   }
   /* A filling EmptyState centres in the panel's remaining space: every wrapper
-     between <main> and it grows, and a plain block wrapper becomes a flex column
-     so the growth reaches it. In base so utilities (hidden, grid, …) still win. */
-  main :has([data-empty-state="fill"]) {
+     between <main> (or a [data-empty-scope] flex column, e.g. a record panel's
+     body) and it grows, and a plain block wrapper becomes a flex column so the
+     growth reaches it. In base so utilities (hidden, grid, …) still win. */
+  :is(main, [data-empty-scope]) :has([data-empty-state="fill"]) {
     flex-grow: 1;
   }
-  main :has([data-empty-state="fill"]):not(.flex, .inline-flex, .grid, .inline-grid) {
+  :is(main, [data-empty-scope]) :has([data-empty-state="fill"]):not(.flex, .inline-flex, .grid, .inline-grid) {
     display: flex;
     flex-direction: column;
   }
@@ -549,6 +550,57 @@ svg[viewBox="0 0 24 24"][stroke] {
 }
 svg[viewBox="0 0 24 24"][stroke] :is(path, circle, ellipse, line, polyline, polygon, rect) {
   vector-effect: non-scaling-stroke;
+}
+
+/* MetalBadge (components/metal-badge.tsx): brushed silver — a vertical
+   steel gradient, a bright top bevel and a soft drop, with a slow sheen
+   sweeping across. Graphite in dark mode. Reduced motion stops the sheen. */
+@layer components {
+  .metal-badge {
+    --metal-hi: #fdfdfd;
+    --metal-mid: #d9dadd;
+    --metal-lo: #b9bbc0;
+    --metal-edge: rgb(0 0 0 / 0.14);
+    --metal-ink: #3a3c41;
+    --metal-sheen: rgb(255 255 255 / 0.85);
+    position: relative;
+    overflow: hidden;
+    color: var(--metal-ink);
+    background: linear-gradient(180deg, var(--metal-hi) 0%, var(--metal-mid) 48%, var(--metal-lo) 52%, var(--metal-mid) 100%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.9),
+      inset 0 -1px 0 rgb(0 0 0 / 0.08),
+      0 0 0 1px var(--metal-edge),
+      0 1px 2px rgb(0 0 0 / 0.12);
+    text-shadow: 0 1px 0 rgb(255 255 255 / 0.6);
+  }
+  .dark .metal-badge {
+    --metal-hi: #6b6e75;
+    --metal-mid: #44464c;
+    --metal-lo: #2f3136;
+    --metal-edge: rgb(255 255 255 / 0.12);
+    --metal-ink: #eceef2;
+    --metal-sheen: rgb(255 255 255 / 0.25);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.22),
+      inset 0 -1px 0 rgb(0 0 0 / 0.3),
+      0 0 0 1px var(--metal-edge),
+      0 1px 2px rgb(0 0 0 / 0.4);
+    text-shadow: 0 -1px 0 rgb(0 0 0 / 0.45);
+  }
+  .metal-badge::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(105deg, transparent 35%, var(--metal-sheen) 50%, transparent 65%);
+    transform: translateX(-120%);
+    animation: metal-sheen 4.5s ease-in-out infinite;
+    pointer-events: none;
+  }
+}
+@keyframes metal-sheen {
+  0%, 60% { transform: translateX(-120%); }
+  100% { transform: translateX(120%); }
 }
 
 /* ProgressBar (components/progress-bar.tsx): Fluid's neutral fill as the

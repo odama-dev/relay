@@ -18,47 +18,54 @@ import {
   ActivityList,
   Highlight,
   HighlightEmpty,
+  NEW_RECORD,
   PanelSection,
   RecordBody,
   RecordPanel,
   StageProgress,
   useOpenRecord,
   useOpenRecordId,
+  useRecordEditing,
   type ActivityItem,
   type RecordTab,
 } from "@/components/record-panel";
 import { ClientPeople } from "../clients/[id]/client-lists";
 import { loadDealRecord } from "./actions";
-import type { SalesChoices } from "./deal-dialog";
+import { DealForm, WonNextStep, type SalesChoices } from "./deal-form";
 
 const PARAM = "deal";
 // The row's stage, value and links are part of the key, so an edit or a move on the board refetches the panel.
 const recordKey = (id: string | null, deal?: DealView | null) =>
   ["deal-record", id, deal ? [deal.stageId, deal.value, deal.currency, deal.person?.id, deal.company?.id, deal.project?.id] : null] as const;
 
-/** Opens the deal panel on the pipeline (`?deal=<id>`, which also keeps the deal in the filtered list). */
+/** Opens the deal panel on the pipeline (`?deal=<id>`, which also keeps the deal in the filtered list; `?deal=new` for a new deal). */
 export const useOpenDeal = () => useOpenRecord(PARAM);
 export const useOpenDealId = () => useOpenRecordId(PARAM);
 
 /**
  * A deal as a side panel over the pipeline: what the card shows and more —
  * stage progress, company and person, notes on the deal, email with its
- * people, and how it moved through the stages. Editing stays in the deal
- * dialog (`onEdit`).
+ * people, and how it moved through the stages. A new deal and a deal's edit
+ * form open in the same panel (`?deal=new`, `&edit=1`).
  */
-export function DealPanel({ deals, choices, onEdit }: { deals: DealView[]; choices: SalesChoices; onEdit: (id: string) => void }) {
+export function DealPanel({ deals, choices }: { deals: DealView[]; choices: SalesChoices }) {
   const dealId = useOpenDealId();
+  const open = useOpenDeal();
+  const editing = useRecordEditing();
   const queryClient = useQueryClient();
+  const isNew = dealId === NEW_RECORD;
   const deal = deals.find((d) => d.id === dealId) ?? null;
   const { data, isLoading, isError } = useQuery<DealRecord>({
     queryKey: recordKey(dealId, deal),
     queryFn: () => loadDealRecord(dealId),
-    enabled: Boolean(dealId),
+    enabled: Boolean(dealId) && !isNew,
     staleTime: 0,
     // A refetch after an edit keeps the panel on screen; another deal's data is never shown (see `ready`).
     placeholderData: keepPreviousData,
   });
   const ready = Boolean(deal && data && data.id === deal.id);
+  // The edit form needs only the board's row, not the record.
+  const form = choices.canManage && (isNew || (editing && deal));
   const reload = () => void queryClient.invalidateQueries({ queryKey: ["deal-record", dealId] });
   // Board order: by stage, then as listed.
   const position = new Map(choices.stages.map((s) => [s.id, s.position]));
@@ -71,11 +78,25 @@ export function DealPanel({ deals, choices, onEdit }: { deals: DealView[]; choic
       scope="Pipeline"
       noun="deal"
       storageKey="deal-panel-width"
-      title={deal?.title}
-      isLoading={(isLoading || Boolean(dealId)) && !ready && !isError}
-      error={isError ? { title: "Couldn't load this deal", description: "It may have been deleted, or you can't see the pipeline." } : null}
+      title={isNew ? "New deal" : deal?.title}
+      isLoading={!form && (isLoading || Boolean(dealId)) && !ready && !isError}
+      error={!form && isError ? { title: "Couldn't load this deal", description: "It may have been deleted, or you can't see the pipeline." } : null}
     >
-      {ready && deal && data && <DealRecordView key={deal.id} deal={deal} record={data} choices={choices} onEdit={() => onEdit(deal.id)} onChanged={reload} />}
+      {form ? (
+        <DealForm
+          key={deal?.id ?? NEW_RECORD}
+          deal={deal ?? undefined}
+          choices={choices}
+          onSaved={(id) => {
+            open(id);
+            reload();
+          }}
+          onCancel={() => open(deal?.id ?? null)}
+          onDeleted={() => open(null)}
+        />
+      ) : (
+        ready && deal && data && <DealRecordView key={deal.id} deal={deal} record={data} choices={choices} onEdit={() => open(deal.id, { edit: true })} onChanged={reload} />
+      )}
     </RecordPanel>
   );
 }
@@ -96,7 +117,7 @@ function DealRecordView({
   const [tab, setTab] = useState("overview");
   const stage = choices.stages.find((s) => s.id === deal.stageId);
   const tabs: RecordTab[] = [
-    { value: "overview", label: "Overview", content: <Overview deal={deal} record={record} choices={choices} onShow={setTab} /> },
+    { value: "overview", label: "Overview", content: <Overview deal={deal} record={record} choices={choices} onShow={setTab} onChanged={onChanged} /> },
     {
       value: "notes",
       label: "Notes",
@@ -128,12 +149,8 @@ function DealRecordView({
     <RecordBody
       icon="target"
       title={deal.title}
-      meta={
-        <>
-          {stage && <StatusBadge value={deal.category} label={stage.name} />}
-          <span className="truncate">{[deal.company?.name ?? deal.client?.name ?? deal.prospectName, deal.person?.name].filter(Boolean).join(" · ")}</span>
-        </>
-      }
+      badge={stage && <StatusBadge value={deal.category} label={stage.name} color={stage.color ?? undefined} />}
+      meta={<span className="truncate">{[deal.company?.name ?? deal.client?.name ?? deal.prospectName, deal.person?.name].filter(Boolean).join(" · ")}</span>}
       actions={
         choices.canManage && (
           <Button type="button" variant="tertiary" size="sm" onClick={onEdit}>
@@ -148,7 +165,19 @@ function DealRecordView({
   );
 }
 
-function Overview({ deal, record, choices, onShow }: { deal: DealView; record: DealRecord; choices: SalesChoices; onShow: (tab: string) => void }) {
+function Overview({
+  deal,
+  record,
+  choices,
+  onShow,
+  onChanged,
+}: {
+  deal: DealView;
+  record: DealRecord;
+  choices: SalesChoices;
+  onShow: (tab: string) => void;
+  onChanged: () => void;
+}) {
   const openClient = useOpenClient();
   const stageName = new Map(choices.stages.map((s) => [s.id, s.name]));
   const stage = stageName.get(deal.stageId) ?? "—";
@@ -197,8 +226,9 @@ function Overview({ deal, record, choices, onShow }: { deal: DealView; record: D
 
   return (
     <div className="flex flex-col gap-6">
+      {deal.category === "won" && <WonNextStep deal={deal} choices={choices} onDone={onChanged} />}
       <PanelSection title="Highlights">
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 @3xl:grid-cols-3">
           <Highlight label="Deal stage" icon="kanban" onClick={record.history.length ? () => onShow("history") : undefined}>
             <span className="flex items-baseline justify-between gap-2">
               <span className="truncate">{stage}</span>

@@ -36,7 +36,7 @@ function Person({ row }: { row: { id: string; name: string; avatarUrl: string | 
 // red over capacity, amber when overdue work is what fills it.
 const tone = (pct: number | null, fromOverdue: boolean) => (pct === null ? "muted" : pct > 100 ? "destructive" : fromOverdue ? "warning" : "brand");
 
-/** "Wireframes ACME-001" for one project, "2 projects · ACME-001, NUSA-001" for several, else the task in progress. */
+/** "Wireframes ACM-001" for one project, "2 projects · ACM-001, NUS-001" for several, else the task in progress. */
 function WorkingOn({ row }: { row: TodayRow }) {
   const projects = row.day.filter((d) => d.code);
   if (row.day.length === 1 || (projects.length === 1 && row.day.length === 2)) {

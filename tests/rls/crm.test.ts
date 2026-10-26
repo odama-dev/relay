@@ -61,6 +61,20 @@ describe("Sales CRM", () => {
     await denied(as("sales", (tx) => tx.crmCompany.create({ data: { name: "  " } })));
   });
 
+  it("keeps the primary domain / email in step with its list", async () => {
+    const co = await as("sales", (tx) => tx.crmCompany.create({ data: { name: "Teh Pagi", domains: [" TehPagi.id ", "tehpagi.id", "", "pagi.co"] } }));
+    expect(co.domains).toEqual(["tehpagi.id", "pagi.co"]);
+    expect(co.domain).toBe("tehpagi.id");
+    // A cell edit of the primary alone replaces the list's first entry.
+    const moved = await as("sales", (tx) => tx.crmCompany.update({ where: { id: co.id }, data: { domain: "Teh.co" } }));
+    expect(moved.domains).toEqual(["teh.co", "pagi.co"]);
+    const p = await as("sales", (tx) => tx.crmPerson.create({ data: { name: "Dewi", email: "Dewi@Teh.co", phones: ["+62 1", "+62 1", "+62 2"] } }));
+    expect(p.emails).toEqual(["dewi@teh.co"]);
+    expect(p.phone).toBe("+62 1");
+    expect(p.phones).toEqual(["+62 1", "+62 2"]);
+    await denied(as("sales", (tx) => tx.crmCompany.create({ data: { name: "Bad ARR", estimatedArr: "lots" } })));
+  });
+
   it("enables RLS and grants nothing to anon", async () => {
     const tables = ["crm_attributes", "crm_companies", "crm_people"];
     const rows = await prisma.$queryRaw<{ rls: boolean }[]>`

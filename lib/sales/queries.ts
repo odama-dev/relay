@@ -6,6 +6,8 @@ import { numOr0 } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
 import { idrRateMap as idrRates } from "@/lib/fx";
 import { estimateIdr } from "@/lib/clevel/pure";
+import { OPTION_COLORS, type OptionColor } from "@/lib/crm/pure";
+import { countryCounts } from "@/lib/geo/pure";
 import { addDays, addMonths, isoDate, monthStart, parseIsoDate, todayIn, type IsoDate } from "@/lib/time/pure";
 import {
   avgDealDays,
@@ -19,11 +21,9 @@ import {
   type LeadSource,
   monthlyCandles,
   newLeads,
-  pipelineBridge,
   pipelineTotals,
   winRate,
   type DealFacts,
-  type StageMove,
 } from "@/lib/sales/pure";
 
 /** Win rate and deal duration look at deals closed in this many days. */
@@ -38,6 +38,8 @@ export type StageView = {
   isHidden: boolean;
   /** Email moves deals into it: "contacted" (you wrote) or "replied" (they answered). */
   autoKey: "contacted" | "replied" | null;
+  /** The board dot's colour; null follows the category. */
+  color: OptionColor | null;
   deals: number;
 };
 
@@ -194,6 +196,7 @@ export async function loadPipeline(user: CurrentUser, f: PipelineFilters) {
         position: s.position,
         isHidden: s.isHidden,
         autoKey: s.autoKey === "contacted" || s.autoKey === "replied" ? s.autoKey : null,
+        color: (OPTION_COLORS as readonly string[]).includes(s.color ?? "") ? (s.color as OptionColor) : null,
         deals: s._count.deals,
       })) satisfies StageView[],
       deals: visible,
@@ -205,40 +208,21 @@ export async function loadPipeline(user: CurrentUser, f: PipelineFilters) {
 
 export type PipelineData = Awaited<ReturnType<typeof loadPipeline>>;
 
-/**
- * Monthly report (PRD "Report bulanan"): candles from the daily snapshots
- * and a bridge per month from the stage history, both in IDR.
- */
-export async function loadSalesReport(user: CurrentUser, months = 6) {
-  const today = todayIn(user.timezone);
-  const first = addMonths(monthStart(today), -(months - 1));
+/** Open pipeline candles (PRD "Report bulanan") from the daily snapshots in the months of `from`–`to`, in IDR. */
+export async function loadSalesReport(user: CurrentUser, from: IsoDate, to: IsoDate) {
   return asUser(user, async (tx) => {
-    const [snapshots, history, deals] = await Promise.all([
-      tx.pipelineSnapshot.findMany({ where: { date: { gte: parseIsoDate(first) } }, orderBy: { date: "asc" } }),
-      tx.dealStageHistory.findMany({ orderBy: { changedAt: "asc" }, select: { dealId: true, toStageId: true, value: true, currency: true, changedAt: true } }),
-      tx.deal.findMany({ select: { value: true, currency: true, probability: true, stage: { select: { category: true } } } }),
-    ]);
-    const stages = new Map((await tx.pipelineStage.findMany({ select: { id: true, category: true } })).map((s) => [s.id, s.category]));
-    const rates = await idrRates(tx, [...history, ...deals].map((d) => d.currency), today);
-    const moves: StageMove[] = history.map((h) => ({
-      dealId: h.dealId,
-      on: todayIn(user.timezone, h.changedAt),
-      to: stages.get(h.toStageId) ?? "open",
-      valueIdr: estimateIdr(numOr0(h.value), h.currency, rates),
-    }));
-    const live = pipelineTotals(
-      deals.map((d) => ({ category: d.stage.category, valueIdr: estimateIdr(numOr0(d.value), d.currency, rates), probability: d.probability, createdOn: today, closedOn: null, stageSince: today })),
-    );
-    const monthList = Array.from({ length: months }, (_, i) => addMonths(first, i));
-    const thisMonth = monthStart(today);
+    const snapshots = await tx.pipelineSnapshot.findMany({ where: { date: { gte: parseIsoDate(monthStart(from)), lt: parseIsoDate(addMonths(monthStart(to), 1)) } }, orderBy: { date: "asc" } });
     return {
-      today,
       firstSnapshot: snapshots[0] ? isoDate(snapshots[0].date) : null,
       candles: monthlyCandles(snapshots.map((s) => ({ date: isoDate(s.date), openIdr: numOr0(s.openIdr) }))),
-      bridges: monthList.map((m) => pipelineBridge(moves, m, m === thisMonth ? live.openIdr : undefined)),
-      unconverted: live.unconverted,
     };
   });
+}
+
+/** The first lead date on record (the start of "All time"); null when there are no deals. */
+export async function loadFirstLeadDate(user: CurrentUser) {
+  const first = await asUser(user, (tx) => tx.deal.aggregate({ _min: { leadDate: true } }));
+  return first._min.leadDate ? isoDate(first._min.leadDate) : null;
 }
 
 /**
@@ -259,9 +243,10 @@ export async function snapshotPipeline(today = todayIn("Asia/Jakarta")) {
 }
 
 /**
- * Sales report insights for a period: the funnel (each visible open stage —
- * Researched → Contacted → Replied → Call booked → Proposal — then Closed won) and the lead-source comparison over the leads that came in
- * within it, and the IDR won per month over the deals closed within it.
+ * Sales report insights: the funnel (each visible open stage — Researched →
+ * Contacted → Replied → Call booked → Proposal — then Closed won) and the
+ * lead-source comparison over every lead on record, and the IDR won per
+ * month over the deals closed within `from`–`to` (the report period).
  */
 export async function loadSalesInsights(user: CurrentUser, from: IsoDate, to: IsoDate) {
   const today = todayIn(user.timezone);
@@ -269,7 +254,6 @@ export async function loadSalesInsights(user: CurrentUser, from: IsoDate, to: Is
     const [stages, deals] = await Promise.all([
       tx.pipelineStage.findMany({ orderBy: [{ position: "asc" }, { createdAt: "asc" }], select: { id: true, name: true, category: true, isHidden: true } }),
       tx.deal.findMany({
-        where: { OR: [{ leadDate: { gte: parseIsoDate(from), lte: parseIsoDate(to) } }, { stage: { category: "won" }, closedAt: { not: null } }] },
         select: {
           id: true,
           value: true,
@@ -289,7 +273,6 @@ export async function loadSalesInsights(user: CurrentUser, from: IsoDate, to: Is
     const facts = deals.map((d) => {
       const reached = [d.stageId, ...d.history.map((h) => h.toStageId)].filter((id) => openIds.has(id)).map((id) => order.get(id) ?? -1);
       return {
-        cohort: isoDate(d.leadDate) >= from && isoDate(d.leadDate) <= to,
         category: d.stage.category,
         source: normalizeLeadSource(d.leadSource),
         closedOn: d.closedAt ? todayIn(user.timezone, d.closedAt) : null,
@@ -297,7 +280,7 @@ export async function loadSalesInsights(user: CurrentUser, from: IsoDate, to: Is
         furthestOpen: reached.length ? Math.max(...reached) : null,
       };
     });
-    const cohort = facts.filter((f) => f.cohort);
+    const closed = facts.filter((f) => f.category === "won" && f.closedOn !== null && f.closedOn >= from && f.closedOn <= to);
     const steps: FunnelStep[] = [
       ...stages.flatMap((s, i) => (s.category === "open" && !s.isHidden ? [{ label: s.name, position: i }] : [])),
       { label: "Closed won", position: "won" as const },
@@ -305,11 +288,26 @@ export async function loadSalesInsights(user: CurrentUser, from: IsoDate, to: Is
     const months: IsoDate[] = [];
     for (let m = monthStart(from); m <= to; m = addMonths(m, 1)) months.push(m);
     return {
-      funnel: funnel(cohort.map((f) => ({ furthestOpen: f.furthestOpen, won: f.category === "won", valueIdr: f.valueIdr })), steps),
-      sources: leadSourceComparison(cohort),
-      won: wonByMonth(facts.filter((f) => f.closedOn !== null && f.closedOn >= from && f.closedOn <= to), months),
-      leads: cohort.length,
-      unconverted: facts.filter((f) => f.valueIdr === null).length,
+      funnel: funnel(facts.map((f) => ({ furthestOpen: f.furthestOpen, won: f.category === "won", valueIdr: f.valueIdr })), steps),
+      sources: leadSourceComparison(facts),
+      won: wonByMonth(closed, months),
+      leads: facts.length,
+      unconverted: closed.filter((f) => f.valueIdr === null).length,
     };
   });
+}
+
+/**
+ * The country tracker: companies (prospects and clients) per country, under
+ * the viewer's RLS. A company without its own country falls back to its
+ * client's; a client that isn't in Companies yet counts on its own.
+ */
+export async function loadCompanyCountries(user: CurrentUser) {
+  const [companies, clients] = await asUser(user, (tx) =>
+    Promise.all([
+      tx.crmCompany.findMany({ where: { archivedAt: null }, select: { country: true, client: { select: { country: true } } } }),
+      tx.client.findMany({ where: { isArchived: false, crmCompany: null }, select: { country: true } }),
+    ]),
+  );
+  return countryCounts([...companies.map((c) => c.country ?? c.client?.country), ...clients.map((c) => c.country)]);
 }

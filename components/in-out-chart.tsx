@@ -22,6 +22,7 @@ const FORMAT = {
  * "grouped": both measures side by side above zero — the first in a light
  * tint, the second in solid blue (e.g. invoiced vs collected) — and the
  * tooltip shows the gap between them. Values are IDR, or hours (decimal).
+ * `height="fill"` takes the rest of a fixed-height parent (at least 240px).
  */
 export function InOutChart({
   data,
@@ -32,7 +33,7 @@ export function InOutChart({
   className,
 }: {
   data: InOutPoint[];
-  height?: number;
+  height?: number | "fill";
   layout?: "mirror" | "grouped";
   labels?: { in: string; out: string; gap: string };
   format?: keyof typeof FORMAT;
@@ -47,7 +48,7 @@ export function InOutChart({
   const rows = grouped ? data : data.map((d) => ({ ...d, out: -Math.abs(d.out) }));
   const swatch = { in: grouped ? "bg-chart-in/30" : "bg-chart-in", out: grouped ? "bg-chart-in" : "bg-chart-out" };
   return (
-    <figure className={cn("flex flex-col gap-2", className)}>
+    <figure className={cn("flex flex-col gap-2", height === "fill" && "min-h-0", className)}>
       <figcaption className="text-muted-foreground flex items-center gap-4 text-caption">
         {(["in", "out"] as const).map((k) => (
           <span key={k} className="flex items-center gap-1.5">
@@ -56,7 +57,7 @@ export function InOutChart({
           </span>
         ))}
       </figcaption>
-      <ChartContainer config={config} className="aspect-auto w-full" style={{ height }}>
+      <ChartContainer config={config} className={cn("aspect-auto w-full", height === "fill" && "min-h-60 flex-1")} style={height === "fill" ? undefined : { height }}>
         <BarChart data={rows} stackOffset={grouped ? undefined : "sign"} margin={{ top: 4, right: 0, bottom: 0, left: 0 }} barCategoryGap={grouped ? "28%" : "34%"} barGap={2}>
           <CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="4 4" />
           <ReferenceLine y={0} stroke="var(--border)" />

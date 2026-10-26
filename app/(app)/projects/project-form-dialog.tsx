@@ -38,6 +38,7 @@ export function ProjectFormDialog({
   defaults,
   project,
   dealId,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -50,6 +51,8 @@ export function ProjectFormDialog({
   project?: { id: string; code: string };
   /** A won deal this new project comes from (Phase 2 · M9). */
   dealId?: string;
+  /** New project: stay where you are (e.g. a client panel) instead of opening the project. */
+  onCreated?: (project: { id: string; code: string }) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -61,6 +64,7 @@ export function ProjectFormDialog({
           defaults={defaults}
           project={project}
           dealId={dealId}
+          onCreated={onCreated}
           onDone={() => onOpenChange(false)}
         />
       </DialogContent>
@@ -75,6 +79,7 @@ function ProjectForm({
   defaults,
   project,
   dealId,
+  onCreated,
   onDone,
 }: {
   clients: ClientChoice[];
@@ -83,6 +88,7 @@ function ProjectForm({
   defaults: ProjectInput;
   project?: { id: string; code: string };
   dealId?: string;
+  onCreated?: (project: { id: string; code: string }) => void;
   onDone: () => void;
 }) {
   const router = useRouter();
@@ -117,7 +123,8 @@ function ProjectForm({
     if (!res.ok) return void toast.error(res.error);
     toast.success(`Project ${res.data.code} created`);
     onDone();
-    router.push(`/projects/${res.data.id}`);
+    if (onCreated) onCreated(res.data);
+    else router.push(`/projects/${res.data.id}`);
   });
 
   const err = errors as Record<string, { message?: string } | undefined> & { budget?: Record<string, { message?: string }> };
@@ -129,7 +136,7 @@ function ProjectForm({
         <DialogDescription>
           {project
             ? "Kind and client are fixed after creation."
-            : "The code is generated from the client code (ACME-001), or INT-001 for internal work."}
+            : "The code is generated from the client code (ACM-001), or INT-001 for internal work."}
         </DialogDescription>
       </DialogHeader>
 

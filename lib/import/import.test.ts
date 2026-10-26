@@ -55,10 +55,10 @@ describe("clients.csv", () => {
     const rows = records(
       "clients",
       IMPORT_EXAMPLES.clients,
-      ["BETA", "Beta", "", "Mars/Olympus", "XYZ", "bad", "", "", "", "x@y.z", ""],
-      ["acme", "Other", "", "", "IDR", "", "", "", "", "", ""],
+      ["BET", "Beta", "", "Mars/Olympus", "XYZ", "bad", "", "", "", "x@y.z", ""],
+      ["acm", "Other", "", "", "IDR", "", "", "", "", "", ""],
     );
-    const ctx = { byName: new Map(), codes: new Map([["ACME", "Acme Corp"]]) };
+    const ctx = { byName: new Map(), codes: new Map([["ACM", "Acme Corp"]]) };
     const res = validateClients(rows, ctx, "skip");
     expect(res[0]!.action).toBe("create");
     expect(res[0]!.data?.contact).toEqual({ name: "Jane Doe", email: "jane@acme.com", title: "Head of Marketing" });
@@ -72,10 +72,21 @@ describe("clients.csv", () => {
   });
 
   it("won't change the code of a client with projects", () => {
-    const rows = records("clients", ["ACMX", "Acme Corp", "", "", "USD", "", "", "", "", "", ""]);
+    const rows = records("clients", ["ACX", "Acme Corp", "", "", "USD", "", "", "", "", "", ""]);
     const ctx = { byName: new Map([["Acme Corp", { code: "ACME", hasProjects: true }]]), codes: new Map([["ACME", "Acme Corp"]]) };
     expect(validateClients(rows, ctx, "skip")[0]!.action).toBe("skip");
     expect(validateClients(rows, ctx, "update")[0]!.errors).toEqual(["the code can't change: the client already has projects"]);
+  });
+
+  it("allows only 2–3 letters for a new code, but keeps an older code on its client", () => {
+    const ctx = { byName: new Map([["Acme Corp", { code: "ACME", hasProjects: true }]]), codes: new Map([["ACME", "Acme Corp"]]) };
+    const kept = records("clients", ["ACME", "Acme Corp", "", "", "USD", "", "", "", "", "", ""]);
+    expect(validateClients(kept, ctx, "update")[0]!.errors).toEqual([]);
+    const fresh = records("clients", ["BETA", "Beta", "", "", "IDR", "", "", "", "", "", ""], ["B2", "Bee", "", "", "IDR", "", "", "", "", "", ""]);
+    expect(validateClients(fresh, ctx, "skip").map((r) => r.errors)).toEqual([
+      ["code must be 2–3 letters, no numbers (not INT)"],
+      ["code must be 2–3 letters, no numbers (not INT)"],
+    ]);
   });
 });
 

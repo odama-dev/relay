@@ -5,13 +5,13 @@ import { asUser, requireUser } from "@/lib/auth";
 import { run, fail, parseOrFail, type ActionResult } from "@/lib/actions";
 import { logActivity } from "@/lib/audit";
 import { perms } from "@/lib/roles";
-import { clientSchema, contactSchema, uuid } from "@/lib/validation";
+import { clientPaymentStatus, clientSchema, contactSchema, uuid, type ClientValues } from "@/lib/validation";
 import type { Tx } from "@/lib/db";
 import { getClientRecord, type ClientRecord } from "@/lib/clients/record";
 
 const FORBIDDEN = "Only PMs, Sales and C-Level manage clients.";
 
-function clientData(d: ReturnType<typeof clientSchema.parse>) {
+function clientData(d: ClientValues) {
   return {
     code: d.code,
     name: d.name,
@@ -33,7 +33,7 @@ export async function createClient(raw: unknown): Promise<ActionResult<{ id: str
   return run(async () => {
     const user = await requireUser();
     if (!perms.editClients(user)) fail(FORBIDDEN);
-    const d = parseOrFail(clientSchema, raw);
+    const d = parseOrFail(clientSchema(), raw);
     const client = await asUser(user, (tx) => tx.client.create({ data: { ...clientData(d), createdBy: user.id } }));
     await logActivity({ actorId: user.id, entityType: "client", entityId: client.id, action: "created", metadata: { code: d.code } });
     revalidateClient();
@@ -46,11 +46,34 @@ export async function updateClient(id: unknown, raw: unknown): Promise<ActionRes
   return run(async () => {
     const user = await requireUser();
     const clientId = parseOrFail(uuid, id);
-    const d = parseOrFail(clientSchema, raw);
-    const res = await asUser(user, (tx) => tx.client.updateMany({ where: { id: clientId }, data: clientData(d) }));
+    const res = await asUser(user, async (tx) => {
+      const current = await tx.client.findUnique({ where: { id: clientId }, select: { code: true } });
+      if (!current) fail("Client not found.");
+      // Its current code stays valid even if it predates the 3-letter rule.
+      const d = parseOrFail(clientSchema(current.code), raw);
+      return tx.client.updateMany({ where: { id: clientId }, data: clientData(d) });
+    });
     if (res.count === 0) fail(FORBIDDEN);
     await logActivity({ actorId: user.id, entityType: "client", entityId: clientId, action: "updated" });
     revalidateClient(clientId);
+  });
+}
+
+/**
+ * Sets the client's payment status by hand (On track / Due soon / Late), or
+ * with null goes back to following its payment requests. Who set it and when
+ * are stamped by the clients_guard trigger.
+ */
+export async function setClientPaymentStatus(id: unknown, raw: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const user = await requireUser();
+    const clientId = parseOrFail(uuid, id);
+    const status = parseOrFail(clientPaymentStatus, raw);
+    const res = await asUser(user, (tx) => tx.client.updateMany({ where: { id: clientId }, data: { paymentStatusOverride: status } }));
+    if (res.count === 0) fail(FORBIDDEN);
+    await logActivity({ actorId: user.id, entityType: "client", entityId: clientId, action: "payment_status_set", metadata: { to: status ?? "automatic" } });
+    revalidateClient(clientId);
+    revalidatePath("/dashboard");
   });
 }
 

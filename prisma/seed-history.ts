@@ -4,8 +4,8 @@
  * time logs, issued invoices with Xendit-style payments, monthly expenses,
  * FX history, revenue targets, leave, corrections and audit rows.
  *
- * Additive and run once: it refuses to run when its first client (LUMN)
- * exists. Writes go through the system connection, so the derived-rule
+ * Additive and run once: it refuses to run when its first client (Lumen
+ * Health) exists. Writes go through the system connection, so the derived-rule
  * triggers (project codes, billable flag, out-of-scope rules) still apply
  * while the RLS-only guards (week locks, invoice locking) are skipped — this
  * is history, written after the fact. Deterministic: the same date gives the
@@ -67,14 +67,14 @@ const doc = (text: string) => ({ type: "doc", content: [{ type: "paragraph", con
 type ClientSeed = { code: string; name: string; country: string; timezone: string; currency: string; email: string; address: string; contact: [string, string, string]; archived?: boolean };
 
 const CLIENTS: ClientSeed[] = [
-  { code: "LUMN", name: "Lumen Health", country: "Singapore", timezone: "Asia/Singapore", currency: "SGD", email: "accounts@lumenhealth.example", address: "71 Robinson Road #14-01\nSingapore 068895", contact: ["Grace Tan", "grace@lumenhealth.example", "Head of Product"] },
-  { code: "BARA", name: "Bara Living", country: "Indonesia", timezone: "Asia/Jakarta", currency: "IDR", email: "finance@baraliving.example", address: "Jl. Kemang Raya No. 45\nJakarta Selatan 12730", contact: ["Sari Wulandari", "sari@baraliving.example", "Marketing Director"] },
-  { code: "NWND", name: "Northwind Labs", country: "United States", timezone: "America/Los_Angeles", currency: "USD", email: "ap@northwind.example", address: "500 Howard Street, Suite 300\nSan Francisco, CA 94105", contact: ["Michael Chen", "michael@northwind.example", "VP Marketing"] },
-  { code: "KRNA", name: "Kirana Hotels", country: "Indonesia", timezone: "Asia/Makassar", currency: "IDR", email: "procurement@kirana.example", address: "Jl. Raya Seminyak No. 88\nBadung, Bali 80361", contact: ["I Made Surya", "made@kirana.example", "General Manager"] },
-  { code: "TIDE", name: "Tidepool Studio", country: "Australia", timezone: "Australia/Sydney", currency: "AUD", email: "hello@tidepool.example", address: "12 Crown Street\nSurry Hills NSW 2010", contact: ["Olivia Hart", "olivia@tidepool.example", "Founder"] },
-  { code: "HALC", name: "Halcyon GmbH", country: "Germany", timezone: "Europe/Berlin", currency: "EUR", email: "buchhaltung@halcyon.example", address: "Torstraße 140\n10119 Berlin", contact: ["Lena Vogel", "lena@halcyon.example", "Communications Lead"] },
-  { code: "SGRA", name: "Sagara Fintech", country: "Indonesia", timezone: "Asia/Jakarta", currency: "IDR", email: "finance@sagara.example", address: "Treasury Tower Lt. 22, SCBD\nJakarta Selatan 12190", contact: ["Andi Nugroho", "andi@sagara.example", "Chief Product Officer"] },
-  { code: "PINE", name: "Pinewood Coffee", country: "Indonesia", timezone: "Asia/Jakarta", currency: "IDR", email: "admin@pinewood.example", address: "Jl. Braga No. 21\nBandung 40111", contact: ["Rudi Setiawan", "rudi@pinewood.example", "Owner"], archived: true },
+  { code: "LMN", name: "Lumen Health", country: "Singapore", timezone: "Asia/Singapore", currency: "SGD", email: "accounts@lumenhealth.example", address: "71 Robinson Road #14-01\nSingapore 068895", contact: ["Grace Tan", "grace@lumenhealth.example", "Head of Product"] },
+  { code: "BAR", name: "Bara Living", country: "Indonesia", timezone: "Asia/Jakarta", currency: "IDR", email: "finance@baraliving.example", address: "Jl. Kemang Raya No. 45\nJakarta Selatan 12730", contact: ["Sari Wulandari", "sari@baraliving.example", "Marketing Director"] },
+  { code: "NWL", name: "Northwind Labs", country: "United States", timezone: "America/Los_Angeles", currency: "USD", email: "ap@northwind.example", address: "500 Howard Street, Suite 300\nSan Francisco, CA 94105", contact: ["Michael Chen", "michael@northwind.example", "VP Marketing"] },
+  { code: "KRN", name: "Kirana Hotels", country: "Indonesia", timezone: "Asia/Makassar", currency: "IDR", email: "procurement@kirana.example", address: "Jl. Raya Seminyak No. 88\nBadung, Bali 80361", contact: ["I Made Surya", "made@kirana.example", "General Manager"] },
+  { code: "TDP", name: "Tidepool Studio", country: "Australia", timezone: "Australia/Sydney", currency: "AUD", email: "hello@tidepool.example", address: "12 Crown Street\nSurry Hills NSW 2010", contact: ["Olivia Hart", "olivia@tidepool.example", "Founder"] },
+  { code: "HLC", name: "Halcyon GmbH", country: "Germany", timezone: "Europe/Berlin", currency: "EUR", email: "buchhaltung@halcyon.example", address: "Torstraße 140\n10119 Berlin", contact: ["Lena Vogel", "lena@halcyon.example", "Communications Lead"] },
+  { code: "SGR", name: "Sagara Fintech", country: "Indonesia", timezone: "Asia/Jakarta", currency: "IDR", email: "finance@sagara.example", address: "Treasury Tower Lt. 22, SCBD\nJakarta Selatan 12190", contact: ["Andi Nugroho", "andi@sagara.example", "Chief Product Officer"] },
+  { code: "PNW", name: "Pinewood Coffee", country: "Indonesia", timezone: "Asia/Jakarta", currency: "IDR", email: "admin@pinewood.example", address: "Jl. Braga No. 21\nBandung 40111", contact: ["Rudi Setiawan", "rudi@pinewood.example", "Owner"], archived: true },
 ];
 
 type Template = { section: string; tasks: string[] }[];
@@ -142,20 +142,20 @@ type ProjectSeed = {
 
 const d = (n: number) => addDays(today, n);
 const PROJECTS: ProjectSeed[] = [
-  { client: "PINE", name: "Packaging Refresh", type: "fixed", currency: "IDR", pm: "bayu", members: ["sekar", "yoga"], start: nextWeekday(START), end: d(-305), status: "completed", template: T_PACK, value: 65_000_000, usage: 0.94 },
-  { client: "BARA", name: "E-commerce Launch", type: "fixed", currency: "IDR", pm: "bayu", members: ["dimas", "sekar", "yoga"], start: d(-357), end: d(-248), status: "completed", template: T_WEB, value: 185_000_000, usage: 1.04 },
-  { client: "LUMN", name: "Patient App UX", type: "fixed", currency: "SGD", pm: "putri", members: ["ana", "yoga"], start: d(-350), end: d(-206), status: "completed", template: T_APP, value: 38_000, usage: 0.97, links: { figma: "https://www.figma.com/file/lumen-patient-app" } },
+  { client: "PNW", name: "Packaging Refresh", type: "fixed", currency: "IDR", pm: "bayu", members: ["sekar", "yoga"], start: nextWeekday(START), end: d(-305), status: "completed", template: T_PACK, value: 65_000_000, usage: 0.94 },
+  { client: "BAR", name: "E-commerce Launch", type: "fixed", currency: "IDR", pm: "bayu", members: ["dimas", "sekar", "yoga"], start: d(-357), end: d(-248), status: "completed", template: T_WEB, value: 185_000_000, usage: 1.04 },
+  { client: "LMN", name: "Patient App UX", type: "fixed", currency: "SGD", pm: "putri", members: ["ana", "yoga"], start: d(-350), end: d(-206), status: "completed", template: T_APP, value: 38_000, usage: 0.97, links: { figma: "https://www.figma.com/file/lumen-patient-app" } },
   { client: null, name: "Odama Brand Refresh", type: null, currency: "IDR", pm: "putri", members: ["ana", "sekar"], start: d(-287), end: d(-172), status: "completed", template: T_INTERNAL_BRAND, value: 0, usage: 0, weight: 0.3 },
-  { client: "NWND", name: "Marketing Site", type: "fixed", currency: "USD", pm: "putri", members: ["dimas", "ana"], start: d(-280), end: d(-143), status: "completed", template: T_WEB, value: 28_000, usage: 0.91, links: { figma: "https://www.figma.com/file/northwind-site", slack_channel: "#nwnd-site" } },
-  { client: "KRNA", name: "Brand Identity", type: "fixed", currency: "IDR", pm: "bayu", members: ["ana", "sekar"], start: d(-259), end: d(-115), status: "completed", template: T_BRAND, value: 240_000_000, usage: 0.88 },
-  { client: "BARA", name: "Social Retainer", type: "retainer", currency: "IDR", pm: "bayu", members: ["sekar", "dimas"], start: monthStart(d(-232)), end: null, status: "active", template: "retainer", value: 35_000_000, usage: 0.9, weight: 0.4, links: { slack_channel: "#bara-social" } },
-  { client: "TIDE", name: "App Redesign", type: "time_and_material", currency: "AUD", pm: "putri", members: ["dimas"], start: d(-196), end: null, status: "on_hold", heldFrom: d(-45), template: T_APP, value: 140, usage: 0.71 },
-  { client: "LUMN", name: "Design System", type: "time_and_material", currency: "SGD", pm: "putri", members: ["ana", "sekar"], start: d(-168), end: null, status: "active", template: T_SYSTEM, value: 150, usage: 0.62, weight: 0.7 },
-  { client: "NWND", name: "Product Retainer", type: "retainer", currency: "USD", pm: "putri", members: ["dimas", "sekar"], start: monthStart(d(-140)), end: null, status: "active", template: "retainer", value: 6_500, usage: 0.95, weight: 0.5 },
+  { client: "NWL", name: "Marketing Site", type: "fixed", currency: "USD", pm: "putri", members: ["dimas", "ana"], start: d(-280), end: d(-143), status: "completed", template: T_WEB, value: 28_000, usage: 0.91, links: { figma: "https://www.figma.com/file/northwind-site", slack_channel: "#nwnd-site" } },
+  { client: "KRN", name: "Brand Identity", type: "fixed", currency: "IDR", pm: "bayu", members: ["ana", "sekar"], start: d(-259), end: d(-115), status: "completed", template: T_BRAND, value: 240_000_000, usage: 0.88 },
+  { client: "BAR", name: "Social Retainer", type: "retainer", currency: "IDR", pm: "bayu", members: ["sekar", "dimas"], start: monthStart(d(-232)), end: null, status: "active", template: "retainer", value: 35_000_000, usage: 0.9, weight: 0.4, links: { slack_channel: "#bara-social" } },
+  { client: "TDP", name: "App Redesign", type: "time_and_material", currency: "AUD", pm: "putri", members: ["dimas"], start: d(-196), end: null, status: "on_hold", heldFrom: d(-45), template: T_APP, value: 140, usage: 0.71 },
+  { client: "LMN", name: "Design System", type: "time_and_material", currency: "SGD", pm: "putri", members: ["ana", "sekar"], start: d(-168), end: null, status: "active", template: T_SYSTEM, value: 150, usage: 0.62, weight: 0.7 },
+  { client: "NWL", name: "Product Retainer", type: "retainer", currency: "USD", pm: "putri", members: ["dimas", "sekar"], start: monthStart(d(-140)), end: null, status: "active", template: "retainer", value: 6_500, usage: 0.95, weight: 0.5 },
   { client: null, name: "Pitch Templates", type: null, currency: "IDR", pm: "bayu", members: ["sekar", "raka"], start: d(-126), end: null, status: "active", template: T_INTERNAL_PITCH, value: 0, usage: 0, weight: 0.2 },
-  { client: "KRNA", name: "Booking Website", type: "fixed", currency: "IDR", pm: "bayu", members: ["dimas", "sekar"], start: d(-105), end: d(60), status: "active", template: T_WEB, value: 320_000_000, usage: 0.79, links: { figma: "https://www.figma.com/file/kirana-booking", slack_channel: "#kirana-web" } },
-  { client: "HALC", name: "Annual Report 2026", type: "fixed", currency: "EUR", pm: "putri", members: ["ana", "sekar"], start: d(-77), end: d(11), status: "active", template: T_REPORT, value: 14_000, usage: 1.13 },
-  { client: "SGRA", name: "Onboarding Flow", type: "fixed", currency: "IDR", pm: "bayu", members: ["dimas", "sekar"], start: d(-42), end: d(39), status: "active", template: T_ONBOARD, value: 150_000_000, usage: 0.38 },
+  { client: "KRN", name: "Booking Website", type: "fixed", currency: "IDR", pm: "bayu", members: ["dimas", "sekar"], start: d(-105), end: d(60), status: "active", template: T_WEB, value: 320_000_000, usage: 0.79, links: { figma: "https://www.figma.com/file/kirana-booking", slack_channel: "#kirana-web" } },
+  { client: "HLC", name: "Annual Report 2026", type: "fixed", currency: "EUR", pm: "putri", members: ["ana", "sekar"], start: d(-77), end: d(11), status: "active", template: T_REPORT, value: 14_000, usage: 1.13 },
+  { client: "SGR", name: "Onboarding Flow", type: "fixed", currency: "IDR", pm: "bayu", members: ["dimas", "sekar"], start: d(-42), end: d(39), status: "active", template: T_ONBOARD, value: 150_000_000, usage: 0.38 },
 ];
 
 /** Month-start reference rates to IDR (oldest first); the seed's last month already has rates. */
@@ -170,8 +170,9 @@ const fxOn = (currency: string, iso: string) => {
 // ---------------------------------------------------------------------------
 
 async function main() {
-  if (await prisma.client.findUnique({ where: { code: "LUMN" } })) {
-    console.log("History is already seeded (client LUMN exists) — nothing to do.");
+  // By name: databases seeded before the 3-letter client codes have it as LUMN.
+  if (await prisma.client.findUnique({ where: { name: "Lumen Health" } })) {
+    console.log("History is already seeded (client Lumen Health exists) — nothing to do.");
     return;
   }
   const profiles = await prisma.profile.findMany();
@@ -551,7 +552,7 @@ async function main() {
   const invoices: InvoiceSeed[] = [];
   /** When the client pays: usually around the due date, sometimes late; never in the future. */
   const payDate = (due: string, client: string) => {
-    const late = client === "TIDE" ? between(6, 25) : client === "KRNA" ? between(-2, 12) : between(-8, 6);
+    const late = client === "TDP" ? between(6, 25) : client === "KRN" ? between(-2, 12) : between(-8, 6);
     const paid = nextWeekday(addDays(due, late));
     return paid < today ? paid : null;
   };
@@ -603,16 +604,17 @@ async function main() {
       }
     }
   }
-  // The existing NUSA retainer: its past months, at the fee the base seed set.
-  const nusa = await prisma.project.findFirst({ where: { code: "NUSA-001" }, include: { contract: true, client: true } });
+  // The existing NUS retainer: its past months, at the fee the base seed set.
+  // By client name: its project is NUSA-001 on databases seeded before the 3-letter codes.
+  const nusa = await prisma.project.findFirst({ where: { client: { name: "Nusa Coffee" } }, orderBy: { createdAt: "asc" }, include: { contract: true, client: true } });
   if (nusa?.client) {
     const fee = Number(nusa.contract?.retainerFeePerMonth ?? 60_000_000);
-    const fake = { seed: { client: "NUSA", name: nusa.name, currency: nusa.currency } as ProjectSeed, id: nusa.id, code: nusa.code, workEnd: today, tasks: [], pmTask: "" } as Built;
+    const fake = { seed: { client: "NUS", name: nusa.name, currency: nusa.currency } as ProjectSeed, id: nusa.id, code: nusa.code, workEnd: today, tasks: [], pmTask: "" } as Built;
     for (let m = monthStart(isoOf(nusa.startDate)); m <= monthStart(today); m = addMonths(m, 1)) {
       const issue = nextWeekday(m);
       if (issue >= today) continue;
       const due = addDays(issue, 14);
-      invoices.push({ b: fake, issue, items: [{ description: `${nusa.name} — ${monthName(m)}`, quantity: 1, unitPrice: fee }], requests: [{ label: "Monthly fee", share: 1, due, paidOn: payDate(due, "NUSA") }] });
+      invoices.push({ b: fake, issue, items: [{ description: `${nusa.name} — ${monthName(m)}`, quantity: 1, unitPrice: fee }], requests: [{ label: "Monthly fee", share: 1, due, paidOn: payDate(due, "NUS") }] });
     }
   }
   // One invoice went out with the wrong amount and was voided, then reissued.

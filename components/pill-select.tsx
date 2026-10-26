@@ -13,12 +13,15 @@ export function PillSelect<T extends string>({
   options,
   onChange,
   ariaLabel,
+  variant = "secondary",
   className,
 }: {
   value: T;
   options: Option<T>[];
   onChange: (value: T) => void;
   ariaLabel: string;
+  /** "tertiary" is the outlined field button (toolbars next to inputs). */
+  variant?: "secondary" | "tertiary";
   className?: string;
 }) {
   const checked = Math.max(0, options.findIndex((o) => o.value === value));
@@ -27,7 +30,7 @@ export function PillSelect<T extends string>({
     <DropdownMenu size="compact">
       <DropdownTrigger
         render={
-          <Button variant="secondary" size="compact" trailingIcon={icons.chevronDown} aria-label={ariaLabel} className={className}>
+          <Button variant={variant} size="compact" trailingIcon={icons.chevronDown} aria-label={ariaLabel} className={className}>
             {options[checked]?.label}
           </Button>
         }

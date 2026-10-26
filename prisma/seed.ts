@@ -173,7 +173,7 @@ async function main() {
 
   const acme = await prisma.client.create({
     data: {
-      code: "ACME",
+      code: "ACM",
       name: "Acme Corp",
       country: "United Kingdom",
       timezone: "Europe/London",
@@ -186,7 +186,7 @@ async function main() {
   });
   const nusa = await prisma.client.create({
     data: {
-      code: "NUSA",
+      code: "NUS",
       name: "Nusa Coffee",
       country: "Indonesia",
       timezone: "Asia/Jakarta",

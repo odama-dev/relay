@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { daysLate, greeting, onTimeRate, projectStanding, requestDueState, resolveWorkPeriod, sumByCurrency, taskRisk, utilizationPct } from "./pure";
+import { clientPaymentState, daysLate, greeting, onTimeRate, projectStanding, requestDueState, resolveWorkPeriod, sumByCurrency, taskRisk, utilizationPct } from "./pure";
 
 const today = "2026-10-16";
 
@@ -30,6 +30,17 @@ describe("requestDueState", () => {
   it("counts days late", () => {
     expect(daysLate("2026-10-06", today)).toBe(10);
     expect(daysLate("2026-10-20", today)).toBe(0);
+  });
+});
+
+describe("clientPaymentState", () => {
+  it("takes the worst open request, and a status set by hand wins", () => {
+    expect(clientPaymentState([])).toBe("none");
+    expect(clientPaymentState([null, null])).toBe("on_track");
+    expect(clientPaymentState([null, "due_soon"])).toBe("due_soon");
+    expect(clientPaymentState(["due_soon", "late", null])).toBe("late");
+    expect(clientPaymentState(["late"], "on_track")).toBe("on_track");
+    expect(clientPaymentState([], "late")).toBe("late");
   });
 });
 

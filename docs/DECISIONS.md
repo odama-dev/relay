@@ -575,11 +575,19 @@ overdue / blocked / ownerless tasks.
   a pending request past due), and stale deals.
 - **Stale** = an open deal in the same stage for more than
   `sales_stale_days` (default 14, admin setting) — PRD open question.
-- **Won → project**: a prospect is first added as a client (code asked,
-  `createClientFromDeal`); then the project form opens prefilled (name,
-  currency, contract value = deal value) and `createProject(values, dealId)`
-  links the deal in the same transaction — the trigger refuses it unless the
-  deal is won, and the deal's client then stays fixed.
+- **Won → project, automatically** (Oct 2026, replaces "Add as client" +
+  the prefilled project form): moving, saving or adding a deal in a Won
+  stage runs `projectForWonDeal` (`lib/sales/won.ts`) in the same RLS
+  transaction. The client is the deal's, its company's, or the client with
+  the prospect's name; otherwise it's created with the first free code from
+  `clientCodeCandidates` (editable later) and the deal's company is linked to
+  it. The project is Active, fixed price, starting today, contract value =
+  deal value, PM = the deal owner if PM / C-Level, else the mover, else the
+  first C-Level — so it shows on New invoice at once. A deal won before this
+  gets a "Create client & project" button (`createProjectFromDeal`). The
+  trigger still refuses a project link unless the deal is won, and the
+  deal's client then stays fixed. Sales also add projects from the client
+  panel / page (Projects tab + "New project").
 - **Attio import**: CSV read by column name (Record ID, Deal name, Company,
   Stage, Value, Currency, Owner, Expected close, Lead source, Service type,
   Lost reason, Created at, Closed at; others ignored), preview, skip or
@@ -773,3 +781,21 @@ overdue / blocked / ownerless tasks.
   connection strength comes from email (`connectionStrength`,
   `lib/crm/pure.ts`); there's no calendar data, so no "next meeting".
 - **Mail** sits under Work in the nav.
+
+## Company and person records (2026-10-26)
+
+- **Create and edit in the side panel**: New company / New person open the
+  record panel on a form (`?company=new`, `?person=new`; `&edit=1` to edit),
+  like deals. A company row opens its panel (team, deals, notes, email).
+  Required: a company's name, a domain and its country; a person's name and
+  an email. Lists (domains, emails, phones, categories) keep their first
+  entry as the primary value (`crm_companies_lists` / `crm_people_lists`).
+- **Create what's missing inline**: names typed into a company's Team become
+  new people at it (only a name, filled in later on People); a company name
+  typed into a person's Company becomes a new company (filled in later on
+  Companies); categories are created by typing them.
+- **Country, not location**: companies and people pick a country from the
+  world map's names (`lib/geo/countries.ts`). The **country tracker** (Sales
+  report, Sales dashboard) now counts companies — prospects and clients — by
+  their country, falling back to the linked client's free-text country; a
+  client not yet in Companies counts on its own.

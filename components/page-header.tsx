@@ -19,12 +19,12 @@ export function PageHeader({ title, description, eyebrow, meta, actions, compact
     return (
       <div
         data-slot="page-header"
-        className={cn("bleed flex min-h-12 items-center justify-between gap-3 border-b py-2", className)}
+        className={cn("bleed flex min-h-12 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b py-2", className)}
       >
         <h1 className="truncate text-[length:var(--fs-subtitle,14px)] leading-[var(--lh-subtitle,20px)] font-semibold">
           {title}
         </h1>
-        {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+        {actions && <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">{actions}</div>}
       </div>
     );
   }

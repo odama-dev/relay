@@ -42,7 +42,7 @@ export type ImportKind = keyof typeof IMPORT_COLUMNS;
 /** Example rows for the downloadable templates. */
 export const IMPORT_EXAMPLES: Record<ImportKind, string[]> = {
   users: ["Ana Putri", "ana@odama.io", "designer_dev", "full_time", "false"],
-  clients: ["ACME", "Acme Corp", "United Kingdom", "Europe/London", "USD", "billing@acme.com", "1 King St, London", "", "Jane Doe", "jane@acme.com", "Head of Marketing"],
+  clients: ["ACM", "Acme Corp", "United Kingdom", "Europe/London", "USD", "billing@acme.com", "1 King St, London", "", "Jane Doe", "jane@acme.com", "Head of Marketing"],
   projects: [
     "Website Redesign",
     "client",

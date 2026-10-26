@@ -97,7 +97,7 @@ export function ColumnDialog({ object, column, onClose }: { object: "company" | 
 }
 
 /** An option's colour: one dot per colour, the chosen one ringed. */
-function ColorDots({ value, onChange }: { value: OptionColor; onChange: (c: OptionColor) => void }) {
+export function ColorDots({ value, onChange }: { value: OptionColor | null; onChange: (c: OptionColor) => void }) {
   return (
     <span className="flex shrink-0 gap-1" role="radiogroup" aria-label="Colour">
       {OPTION_COLORS.map((c) => (

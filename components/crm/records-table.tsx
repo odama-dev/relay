@@ -217,18 +217,16 @@ export function RecordsTable<R extends RecordRow>({
         )}
         <span className="ml-auto flex items-center gap-2">{actions}</span>
       </div>
-      <div className="overflow-x-auto">
-        <DataTable
-          columns={table}
-          rows={filtered}
-          getRowId={(r) => r.id}
-          onRowClick={onOpen}
-          isRowSelected={openId ? (r) => r.id === openId : undefined}
-          pageSize={100}
-          emptyTitle={q ? "Nothing matches" : `No ${noun === "company" ? "companies" : "people"} yet`}
-          emptyDescription={q ? "Try another search." : `Add one with "New ${noun}".`}
-        />
-      </div>
+      <DataTable
+        columns={table}
+        rows={filtered}
+        getRowId={(r) => r.id}
+        onRowClick={onOpen}
+        isRowSelected={openId ? (r) => r.id === openId : undefined}
+        pageSize={100}
+        emptyTitle={q ? "Nothing matches" : `No ${noun === "company" ? "companies" : "people"} yet`}
+        emptyDescription={q ? "Try another search." : `Add one with "New ${noun}".`}
+      />
       <p className="text-muted-foreground bleed border-t py-2 text-caption">
         <span className="tabular">{filtered.length}</span> {filtered.length === 1 ? noun : noun === "company" ? "companies" : "people"}
         {q && ` of ${rows.length}`}

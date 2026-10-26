@@ -57,6 +57,9 @@ const MAP: Record<string, Tone> = {
   overdue: "critical",
   void: "neutral",
   expired: "critical",
+  // client payment (lib/dashboard/pure.ts)
+  due_soon: "warning",
+  late: "critical",
   // pipeline stage categories + deals (Phase 2 · M9)
   open: "active",
   won: "positive",
@@ -83,16 +86,19 @@ export function statusLabel(value: string) {
 export function StatusBadge({
   value,
   label,
+  color,
   className,
 }: {
   value: string;
   /** Overrides the label, keeping the value's tone. */
   label?: string;
+  /** Overrides the dot's hue, e.g. a pipeline stage's own colour. */
+  color?: BadgeColor;
   className?: string;
 }) {
   const tone = MAP[value] ?? "neutral";
   return (
-    <Badge variant="dot" color={TONE_COLOR[tone]} className={className}>
+    <Badge variant="dot" color={color ?? TONE_COLOR[tone]} className={className}>
       {label ?? statusLabel(value)}
     </Badge>
   );
@@ -101,6 +107,11 @@ export function StatusBadge({
 /** The hue a status value reads in (badge dot, kanban column dot). */
 export function statusColor(value: string) {
   return badgeColors[TONE_COLOR[MAP[value] ?? "neutral"]];
+}
+
+/** A pipeline stage's hue: its own colour, else its category's (board column dot, deal badge, stage bar). */
+export function stageColor(stage: { color?: string | null; category: string }) {
+  return stage.color && stage.color in badgeColors ? badgeColors[stage.color as BadgeColor] : statusColor(stage.category);
 }
 
 /**

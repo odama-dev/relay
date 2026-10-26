@@ -2,10 +2,18 @@
 
 import type { ClientRow } from "@/lib/clients/queries";
 import { DataTable, type Column } from "@/components/data-table";
+import { PillButton } from "@/components/pill-button";
+import { NEW_RECORD } from "@/components/record-panel";
 import { ClientPanel, useOpenClient, useOpenClientId } from "@/components/clients/client-panel";
 
-/** Clients; a row opens the client as a side panel over the list. */
-export function ClientsTable({ rows }: { rows: ClientRow[] }) {
+/** Opens the client panel on a blank client (`?client=new`). */
+export function AddClientButton() {
+  const openClient = useOpenClient();
+  return <PillButton onClick={() => openClient(NEW_RECORD)}>Add client</PillButton>;
+}
+
+/** Clients; a row opens the client as a side panel over the list (a new client opens there too). */
+export function ClientsTable({ rows, canCreate }: { rows: ClientRow[]; canCreate: boolean }) {
   const openClient = useOpenClient();
   const openId = useOpenClientId();
   const columns: Column<ClientRow>[] = [
@@ -38,7 +46,7 @@ export function ClientsTable({ rows }: { rows: ClientRow[] }) {
         emptyTitle="No clients match"
         emptyDescription="Try another search."
       />
-      <ClientPanel ids={rows.map((r) => r.id)} />
+      <ClientPanel ids={rows.map((r) => r.id)} canCreate={canCreate} />
     </>
   );
 }

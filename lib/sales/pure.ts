@@ -111,6 +111,27 @@ export function isStale(category: StageCategory, stageSince: IsoDate, today: Iso
   return category === "open" && stageSince < addDays(today, -days);
 }
 
+/**
+ * Client codes to try for a won prospect, best first: initials of a
+ * multi-word name (or the first letters of one word), then the first word's
+ * first two or three letters, then its first letter with each other letter.
+ * Valid codes only (2–3 capitals, never INT).
+ */
+export function clientCodeCandidates(name: string): string[] {
+  const words = name.toUpperCase().replace(/[^A-Z ]/g, " ").split(/\s+/).filter(Boolean);
+  const first = words[0] ?? "";
+  const initials = words.length > 1 ? words.map((w) => w[0]).join("").slice(0, 3) : first.slice(0, 3);
+  const lead = first[0] ?? "C";
+  const all = [
+    initials.padEnd(2, "X"),
+    first.slice(0, 3),
+    first.slice(0, 2),
+    ...first.slice(1).split("").map((c) => lead + c),
+    ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((c) => (initials.slice(0, 2).padEnd(2, "X") + c)),
+  ];
+  return [...new Set(all)].filter((c) => /^[A-Z]{2,3}$/.test(c) && c !== "INT");
+}
+
 // ---------------------------------------------------------------------------
 // Monthly report
 // ---------------------------------------------------------------------------
@@ -228,4 +249,33 @@ export function wonByMonth(deals: { category: StageCategory; closedOn: IsoDate |
     const won = deals.filter((d) => d.category === "won" && d.closedOn !== null && monthStart(d.closedOn) === month);
     return { month, deals: won.length, valueIdr: round2(won.reduce((s, d) => s + (d.valueIdr ?? 0), 0)) };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Sales report period
+// ---------------------------------------------------------------------------
+
+export const REPORT_RANGES = [
+  { value: "3m", label: "Last 3 months", months: 3 },
+  { value: "6m", label: "Last 6 months", months: 6 },
+  { value: "1y", label: "Last 12 months", months: 12 },
+  { value: "all", label: "All time", months: null },
+] as const;
+export type ReportRange = (typeof REPORT_RANGES)[number]["value"];
+export const DEFAULT_REPORT_RANGE: ReportRange = "6m";
+
+/**
+ * The report's period: a custom `from`–`to` wins; otherwise a preset of whole
+ * months ending today (this month counts), or everything since the first
+ * lead. Unknown presets fall back to the default.
+ */
+export function reportPeriod(
+  opts: { range?: string; from?: IsoDate; to?: IsoDate },
+  today: IsoDate,
+  firstLead: IsoDate | null,
+): { range: ReportRange | "custom"; from: IsoDate; to: IsoDate } {
+  if (opts.from) return { range: "custom", from: opts.from, to: opts.to && opts.to >= opts.from ? opts.to : today };
+  const preset = REPORT_RANGES.find((r) => r.value === opts.range) ?? REPORT_RANGES.find((r) => r.value === DEFAULT_REPORT_RANGE)!;
+  const from = preset.months === null ? (firstLead && firstLead < today ? monthStart(firstLead) : monthStart(today)) : addMonths(monthStart(today), -(preset.months - 1));
+  return { range: preset.value, from, to: today };
 }

@@ -89,14 +89,18 @@ async function crmIndex() {
   const [people, companies] = await Promise.all([
     prisma.crmPerson.findMany({
       where: { archivedAt: null, email: { not: null } },
-      select: { id: true, email: true, companyId: true },
+      select: { id: true, emails: true, companyId: true },
     }),
     prisma.crmCompany.findMany({
       where: { archivedAt: null, domain: { not: null } },
-      select: { id: true, domain: true },
+      select: { id: true, domains: true },
     }),
   ]);
-  return { people, companies };
+  // Every address and domain a record has matches it, primary first.
+  return {
+    people: people.flatMap((p) => p.emails.map((email) => ({ id: p.id, email, companyId: p.companyId }))),
+    companies: companies.flatMap((c) => c.domains.map((domain) => ({ id: c.id, domain }))),
+  };
 }
 
 /**

@@ -15,14 +15,15 @@ import { MoneyText } from "@/components/money-text";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/states";
 import { icons } from "@/components/icon";
-import { DealDialog, type SalesChoices } from "./deal-dialog";
+import type { SalesChoices } from "./deal-form";
 import { PipelineBoard } from "./pipeline-board";
 import { StagesDialog } from "./stages-dialog";
 import { ImportDialog } from "./import-dialog";
 import { DealPanel, useOpenDeal, useOpenDealId } from "./deal-panel";
 import { ClientPanel } from "@/components/clients/client-panel";
+import { NEW_RECORD } from "@/components/record-panel";
 
-type Open = { kind: "deal"; id?: string } | { kind: "stages" } | { kind: "import" } | null;
+type Open = { kind: "stages" } | { kind: "import" } | null;
 
 /** Pipeline page body: header actions, the board / list toggle and the dialogs they open. */
 export function PipelineView({ deals, choices, header, filters }: { deals: DealView[]; choices: SalesChoices; header: React.ReactNode; filters: React.ReactNode }) {
@@ -30,12 +31,10 @@ export function PipelineView({ deals, choices, header, filters }: { deals: DealV
   const pathname = usePathname();
   const params = useSearchParams();
   const view: ViewMode = params.get("view") === "list" ? "list" : "kanban";
-  // A deal opens as a side panel (`?deal=`); the dialog is for new deals and edits.
+  // A deal — new, open or being edited — is a side panel (`?deal=`).
   const [open, setOpen] = useState<Open>(null);
   const openPanel = useOpenDeal();
   const panelId = useOpenDealId();
-  const edit = (id: string) => setOpen({ kind: "deal", id });
-  const openDeal = deals.find((d) => open?.kind === "deal" && d.id === open.id);
 
   const setView = (v: ViewMode) => {
     const next = new URLSearchParams(params.toString());
@@ -62,7 +61,7 @@ export function PipelineView({ deals, choices, header, filters }: { deals: DealV
                 <Button variant="ghost" size="sm" leadingIcon={icons.settings} onClick={() => setOpen({ kind: "stages" })}>
                   Stages
                 </Button>
-                <PillButton onClick={() => setOpen({ kind: "deal" })}>New deal</PillButton>
+                <PillButton onClick={() => openPanel(NEW_RECORD)}>New deal</PillButton>
               </>
             )}
           </>
@@ -79,16 +78,15 @@ export function PipelineView({ deals, choices, header, filters }: { deals: DealV
             icon="target"
             title="No deals yet"
             description="Add your leads here — or import them from Attio — and move them through the stages until they're won."
-            action={choices.canManage ? <PillButton onClick={() => setOpen({ kind: "deal" })}>New deal</PillButton> : null}
+            action={choices.canManage ? <PillButton onClick={() => openPanel(NEW_RECORD)}>New deal</PillButton> : null}
           />
         ) : view === "kanban" ? (
-          <PipelineBoard deals={deals} choices={choices} onOpen={openPanel} onEdit={edit} />
+          <PipelineBoard deals={deals} choices={choices} onOpen={openPanel} />
         ) : (
           <DealsTable deals={deals} choices={choices} onOpen={openPanel} selectedId={panelId} />
         )}
       </div>
-      {open?.kind === "deal" && (open.id ? openDeal : true) && <DealDialog deal={openDeal} choices={choices} onClose={() => setOpen(null)} />}
-      <DealPanel deals={deals} choices={choices} onEdit={edit} />
+      <DealPanel deals={deals} choices={choices} />
       <ClientPanel scope="Pipeline" />
       {open?.kind === "stages" && <StagesDialog stages={choices.stages} onClose={() => setOpen(null)} />}
       {open?.kind === "import" && <ImportDialog onClose={() => setOpen(null)} />}

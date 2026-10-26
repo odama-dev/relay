@@ -2,6 +2,8 @@ import { z } from "zod";
 import { ACCESS_LEVELS, APP_MODULES, DIVISIONS, EMPLOYMENT_TYPES, USER_ROLES } from "@/lib/roles";
 import { isIsoDate } from "@/lib/time/pure";
 import { LEAD_SOURCES, LEAD_TYPES } from "@/lib/sales/pure";
+import { ARR_RANGES, EMPLOYEE_RANGES, OPTION_COLORS, normalizeDomain } from "@/lib/crm/pure";
+import { COUNTRIES } from "@/lib/geo/countries";
 
 /**
  * Shared Zod schemas — imported by client forms and server actions so each
@@ -133,24 +135,58 @@ export const categorySchema = z.object({ name: text(60).min(1, "Enter a name") }
 // M1 — clients & projects
 // ---------------------------------------------------------------------------
 
-export const clientCodeSchema = z
-  .string()
-  .trim()
-  .toUpperCase()
-  .regex(/^[A-Z]{2,6}$/, "2–6 capital letters, e.g. ACME")
-  .refine((v) => v !== "INT", "INT is reserved for internal projects");
+/** A new client code: 2–3 capital letters, e.g. ACM (clients_guard trigger). */
+export const CLIENT_CODE = /^[A-Z]{2,3}$/;
 
-export const clientSchema = z.object({
-  code: clientCodeSchema,
-  name: text(160).min(1, "Enter the client name"),
-  country: optionalText(80),
-  timezone: optionalText(64),
-  defaultCurrency: z.enum(CURRENCIES),
-  billingEmail: optionalEmail,
-  billingAddress: optionalText(500),
-  notes: optionalText(4000),
-});
-export type ClientInput = z.input<typeof clientSchema>;
+/** Why a code isn't a valid new client code, or null when it is. */
+export function clientCodeError(code: string): string | null {
+  if (!/^[A-Z]*$/.test(code)) return "Letters only, no numbers";
+  if (!CLIENT_CODE.test(code)) return "2–3 letters, e.g. ACM";
+  if (code === "INT") return "INT is reserved for internal projects";
+  return null;
+}
+
+/**
+ * A client code. `keep` is the client's current code: a code set before the
+ * 3-letter rule stays valid on its own client.
+ */
+export const clientCodeSchema = (keep?: string) =>
+  z
+    .string()
+    .trim()
+    .toUpperCase()
+    .superRefine((v, ctx) => {
+      const error = v === keep ? null : clientCodeError(v);
+      if (error) ctx.addIssue({ code: "custom", message: error });
+    });
+
+/** An IANA time zone, e.g. Asia/Jakarta. */
+export function isTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export const clientSchema = (keepCode?: string) =>
+  z.object({
+    code: clientCodeSchema(keepCode),
+    name: text(160).min(1, "Enter the client name"),
+    country: optionalText(80),
+    timezone: optionalText(64).refine((v) => !v || isTimeZone(v), "Pick a time zone from the list"),
+    defaultCurrency: z.enum(CURRENCIES),
+    billingEmail: optionalEmail,
+    billingAddress: optionalText(500),
+    notes: optionalText(4000),
+  });
+export type ClientInput = z.input<ReturnType<typeof clientSchema>>;
+export type ClientValues = z.output<ReturnType<typeof clientSchema>>;
+
+/** A client's payment status set by hand; null goes back to following its payment requests. */
+export const CLIENT_PAYMENT_STATUSES = ["on_track", "due_soon", "late"] as const;
+export const clientPaymentStatus = z.enum(CLIENT_PAYMENT_STATUSES).nullable();
 
 export const contactSchema = z.object({
   name: text(120).min(1, "Enter a name"),
@@ -631,6 +667,8 @@ export const stageSchema = z.object({
   name: text(60).min(1, "Name the stage"),
   category: z.enum(STAGE_CATEGORIES),
   probability,
+  /** The board dot; null follows the category. */
+  color: z.enum(OPTION_COLORS).nullable().default(null),
 });
 export type StageInput = z.input<typeof stageSchema>;
 
@@ -712,8 +750,66 @@ export type CrmColumnInput = z.input<typeof crmColumnSchema>;
 
 export const crmColumnEditSchema = crmColumnSchema.pick({ name: true, options: true });
 
-export const crmCompanySchema = z.object({ name: text(160).min(1, "Name the company"), domain: optionalText(200) });
-export const crmPersonSchema = z.object({ name: text(160).min(1, "Enter a name"), email: optionalEmail, companyId: optionalUuid });
+const crmDomain = z.string().transform((v, ctx) => normalizeDomain(v) ?? (ctx.addIssue({ code: "custom", message: `“${v}” isn't a domain — e.g. kopisenja.id` }), z.NEVER));
+const crmPhone = text(40).min(1);
+const crmSocial = optionalText(300);
+const crmSocials = { angellist: crmSocial, facebook: crmSocial, instagram: crmSocial, linkedin: crmSocial, twitter: crmSocial };
+const followers = z.number({ error: "Enter a number" }).int("Whole numbers only").min(0).max(10_000_000_000).nullable().default(null);
+const ids = z.array(uuid).max(500).default([]);
+const country = z.enum(COUNTRIES, { error: "Pick a country from the list" });
+const isUuid = (v: string) => uuid.safeParse(v).success;
+
+/**
+ * A company's team: people picked from People (their ids) and names typed in,
+ * which become new people at the company, to fill in later on People.
+ */
+const crmTeam = z
+  .array(z.string().trim().min(1).max(160))
+  .max(500)
+  .default([])
+  .transform((list) => ({ ids: list.filter(isUuid), names: [...new Set(list.filter((v) => !isUuid(v)))] }));
+
+/** A person's company: one picked from Companies (its id), or a name typed in, which becomes a new company. */
+const crmCompanyPick = z
+  .string()
+  .trim()
+  .max(160)
+  .optional()
+  .transform((v) => (!v ? null : isUuid(v) ? { id: v, name: null } : { id: null, name: v }));
+
+/** The company panel's create / edit form. Name, a domain and the country are required. */
+export const crmCompanySchema = z.object({
+  name: text(160).min(1, "Name the company"),
+  domains: z.array(crmDomain).min(1, "Add the company's domain").max(20),
+  description: optionalText(4000),
+  team: crmTeam,
+  categories: z.array(text(60).min(1)).max(30).default([]),
+  country: z.enum(COUNTRIES, { error: "Pick the company's country" }),
+  ...crmSocials,
+  twitterFollowers: followers,
+  estimatedArr: z.enum(ARR_RANGES).nullable().default(null),
+  fundingRaised: amount.nullable().default(null),
+  fundingCurrency: z.enum(CURRENCIES).default("USD"),
+  foundedOn: optionalIsoDate,
+  employeeRange: z.enum(EMPLOYEE_RANGES).nullable().default(null),
+  dealIds: ids,
+});
+export type CrmCompanyInput = z.input<typeof crmCompanySchema>;
+
+/** The person panel's create / edit form. Name and an email are required. */
+export const crmPersonSchema = z.object({
+  name: text(160).min(1, "Enter a name"),
+  emails: z.array(email).min(1, "Add their email address").max(20),
+  description: optionalText(4000),
+  company: crmCompanyPick,
+  jobTitle: optionalText(120),
+  phones: z.array(crmPhone).max(20).default([]),
+  country: country.nullable().default(null),
+  ...crmSocials,
+  twitterFollowers: followers,
+  dealIds: ids,
+});
+export type CrmPersonInput = z.input<typeof crmPersonSchema>;
 
 /** A note on a client, company, person or deal (at least one). */
 export const crmNoteSchema = z

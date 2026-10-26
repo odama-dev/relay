@@ -83,6 +83,7 @@ const DATE = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", 
 const DATE_SHORT = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
 const WEEKDAY = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "2-digit", month: "short", timeZone: "UTC" });
 const MONTH = new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+const MONTH_ABBR = new Intl.DateTimeFormat("en-GB", { month: "short", timeZone: "UTC" });
 const DATE_LONG = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
 
 /**
@@ -111,6 +112,11 @@ export function formatDateLong(value: DateInput): string {
 /** "October 2026". */
 export function formatMonth(value: DateInput): string {
   return value ? MONTH.format(toDate(value)) : "—";
+}
+
+/** "Oct" — a month's three-letter name (chart axes). */
+export function formatMonthAbbr(value: DateInput): string {
+  return value ? MONTH_ABBR.format(toDate(value)).slice(0, 3) : "—";
 }
 
 /** "13 Oct 2026, 21:40" — a moment, shown in the viewer's time zone. */

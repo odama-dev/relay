@@ -56,7 +56,7 @@ const paid = (requestId: string, xenditId: string, paymentId: string, amount: nu
 beforeAll(async () => {
   await prisma.profile.create({ data: { id: salesId, email: `sales-${salesId}@flow.test`, fullName: "Flow Sales", role: "sales", status: "active" } });
   const pm = await prisma.profile.create({ data: { id: randomUUID(), email: `pm-${salesId}@flow.test`, fullName: "Flow PM", role: "pm", status: "active" } });
-  const client = await prisma.client.create({ data: { code: "FLOW", name: `Flow ${salesId}` } });
+  const client = await prisma.client.create({ data: { code: "FLW", name: `Flow ${salesId}` } });
   clientId = client.id;
   const project = await prisma.project.create({
     data: { name: "Flow", kind: "client", clientId, contractType: "fixed", currency: "USD", pmId: pm.id, startDate: new Date("2026-10-01") },

@@ -32,6 +32,7 @@ import { SidebarInsetTopbar } from "@/components/sidebar-app/inset-topbar";
 import { MemberAvatar } from "@/components/member-avatar";
 import { Icon, icons } from "@/components/icon";
 import { useShape } from "@/lib/shape-context";
+import { MetalBadge } from "@/components/metal-badge";
 import { cn } from "@/lib/utils";
 import { GlobalSearch } from "./global-search";
 import { NotificationBell } from "./notification-bell";
@@ -45,11 +46,20 @@ const THEMES = [
   { value: "system", label: "System", icon: icons.system },
 ] as const;
 
-/** One nav row: a Fluid sidebar menu button rendered as a Next link. */
-function NavLink({ item }: { item: NavItem }) {
+/** One nav row: a Fluid sidebar menu button rendered as a Next link; a coming-soon row is a disabled button. */
+function NavLink({ item, disabled = false }: { item: NavItem; disabled?: boolean }) {
   const pathname = usePathname();
   const { isMobile, setOpenMobile } = useSidebar();
   const active = item.exact ? pathname === item.href : isUnder(pathname, item.href);
+  if (disabled) {
+    return (
+      <SidebarMenuItem>
+        <SidebarMenuButton icon={icons[item.icon]} disabled>
+          {item.label}
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    );
+  }
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
@@ -164,10 +174,15 @@ function AppSidebar({ user, inbox, onSearch }: { user: ShellUser; inbox: Inbox; 
       <SidebarContent>
         {groups.map((group, i) => (
           <SidebarGroup key={group.label ?? i}>
-            {group.label && <SidebarGroupLabel>{group.label}</SidebarGroupLabel>}
+            {group.label && (
+              <SidebarGroupLabel className={cn(group.comingSoon && "justify-between")}>
+                {group.label}
+                {group.comingSoon && <MetalBadge>Coming soon</MetalBadge>}
+              </SidebarGroupLabel>
+            )}
             <SidebarMenu aria-label={group.label ?? "Primary"}>
               {group.items.map((item) => (
-                <NavLink key={item.href} item={item} />
+                <NavLink key={item.href} item={item} disabled={group.comingSoon} />
               ))}
             </SidebarMenu>
           </SidebarGroup>

@@ -1,6 +1,6 @@
 import { requireAccess } from "@/lib/auth";
 import { perms } from "@/lib/roles";
-import { loadPeople } from "@/lib/crm/queries";
+import { crmFormOptions, loadPeople } from "@/lib/crm/queries";
 import { activePeopleOptions } from "@/lib/people/queries";
 import { PageHeader } from "@/components/page-header";
 import { PeopleView } from "./people-view";
@@ -11,7 +11,7 @@ export const metadata = { title: "People" };
 export default async function SalesPeoplePage({ searchParams }: { searchParams: Promise<{ company?: string }> }) {
   const user = await requireAccess(perms.viewPipeline);
   const { company } = await searchParams;
-  const [data, people] = await Promise.all([loadPeople(user), activePeopleOptions(user)]);
+  const [data, people, options] = await Promise.all([loadPeople(user), activePeopleOptions(user), crmFormOptions(user)]);
   const at = company ? data.companies.find((c) => c.id === company) : undefined;
   return (
     <div className="flex flex-col">
@@ -21,6 +21,8 @@ export default async function SalesPeoplePage({ searchParams }: { searchParams: 
         columns={data.columns}
         companies={data.companies}
         owners={people.map((p) => ({ id: p.id, name: p.name }))}
+        options={options}
+        defaultCompanyId={at?.id}
         canEdit={perms.manageDeals(user)}
       />
     </div>

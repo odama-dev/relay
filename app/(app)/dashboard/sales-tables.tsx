@@ -1,10 +1,11 @@
 "use client";
 
-import type { MyInvoice } from "@/lib/dashboard/queries";
+import type { ActiveClient, MyInvoice } from "@/lib/dashboard/queries";
 import { formatDateShort } from "@/lib/format";
 import { DataTable, type Column } from "@/components/data-table";
 import { ClientPanel, useOpenClient, useOpenClientId } from "@/components/clients/client-panel";
 import { InvoiceStatusMenu } from "@/components/invoice/invoice-status-menu";
+import { ClientPaymentMenu } from "@/components/clients/client-payment-menu";
 import { MoneyText } from "@/components/money-text";
 import { Icon, type IconName } from "@/components/icon";
 
@@ -62,20 +63,20 @@ export function MyInvoicesTable({ rows }: { rows: MyInvoice[] }) {
   );
 }
 
-type ClientRow = { id: string; name: string; projects: number; late: boolean };
+const PAYMENT_ORDER: Record<ActiveClient["payment"], number> = { late: 0, due_soon: 1, on_track: 2, none: 3 };
 
-/** SL-3 — your clients with active work, and whether any payment is late. */
-export function ActiveClientsTable({ rows }: { rows: ClientRow[] }) {
+/** SL-3 — your clients with active work, and their payment status (set by hand when it's known better). */
+export function ActiveClientsTable({ rows, canEdit }: { rows: ActiveClient[]; canEdit: boolean }) {
   const openClient = useOpenClient();
   const openId = useOpenClientId();
-  const columns: Column<ClientRow>[] = [
+  const columns: Column<ActiveClient>[] = [
     { id: "name", header: "Client", primary: true, cell: (r) => r.name, sortValue: (r) => r.name },
     { id: "projects", header: "Active projects", align: "right", cell: (r) => <span className="tabular">{r.projects}</span>, sortValue: (r) => r.projects },
     {
       id: "payment",
       header: "Payment",
-      cell: (r) => (r.late ? <span className="text-destructive">Late</span> : <span className="text-muted-foreground">On time</span>),
-      sortValue: (r) => Number(r.late),
+      cell: (r) => <ClientPaymentMenu id={r.id} status={r.payment} auto={r.autoPayment} manual={r.manual} canEdit={canEdit} />,
+      sortValue: (r) => PAYMENT_ORDER[r.payment],
     },
   ];
   return (

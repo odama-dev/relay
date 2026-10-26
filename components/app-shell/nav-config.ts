@@ -13,6 +13,9 @@ export type NavItem = {
 
 export type NavGroup = {
   label?: string;
+  /** Not open yet, for everyone: a "Coming soon" badge beside the label and
+   *  disabled rows. Each route also renders ComingSoon from its layout.tsx. */
+  comingSoon?: boolean;
   items: NavItem[];
 };
 
@@ -55,6 +58,7 @@ export const navGroups: NavGroup[] = [
   },
   {
     label: "Performance",
+    comingSoon: true,
     items: [
       { label: "KPI", href: "/kpi", icon: "target" },
       { label: "OKR", href: "/okr", icon: "flag" },

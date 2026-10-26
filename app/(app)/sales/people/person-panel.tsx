@@ -3,11 +3,13 @@
 import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { PersonRow, Ref } from "@/lib/crm/queries";
+import type { CrmFormOptions, PersonRow, Ref } from "@/lib/crm/queries";
 import type { PersonRecord } from "@/lib/crm/person-record";
 import { CONNECTION_LABELS, type ConnectionStrength, type CrmValue } from "@/lib/crm/pure";
 import { formatDate, formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { COUNTRY_REFS } from "@/components/country-select";
 import { DataTable, type Column } from "@/components/data-table";
 import { StatusBadge } from "@/components/status-badge";
 import { MoneyText } from "@/components/money-text";
@@ -20,18 +22,22 @@ import {
   ActivityList,
   Highlight,
   HighlightEmpty,
+  NEW_RECORD,
   PanelSection,
   RecordBody,
   RecordPanel,
   useOpenRecord,
   useOpenRecordId,
+  useRecordEditing,
   type ActivityItem,
   type RecordTab,
 } from "@/components/record-panel";
 import { loadPersonRecord, setField } from "../crm-actions";
+import { PersonForm } from "./person-form";
 
 const PARAM = "person";
 
+/** Opens the person panel on People (`?person=<id>`; `?person=new` for a new person). */
 export const useOpenPerson = () => useOpenRecord(PARAM);
 export const useOpenPersonId = () => useOpenRecordId(PARAM);
 
@@ -45,21 +51,40 @@ const STRENGTH_DOT: Record<ConnectionStrength, string> = {
 /**
  * A person as a side panel over People: connection strength from email,
  * company, email and phone, their deals, notes and mail. Fields edit in
- * place, like the table.
+ * place, like the table. A new person and a person's edit form open in the
+ * same panel (`?person=new`, `&edit=1`).
  */
-export function PersonPanel({ rows, companies, owners, canEdit }: { rows: PersonRow[]; companies: Ref[]; owners: Ref[]; canEdit: boolean }) {
+export function PersonPanel({
+  rows,
+  companies,
+  owners,
+  options,
+  defaultCompanyId,
+  canEdit,
+}: {
+  rows: PersonRow[];
+  companies: Ref[];
+  owners: Ref[];
+  options: CrmFormOptions;
+  defaultCompanyId?: string;
+  canEdit: boolean;
+}) {
   const personId = useOpenPersonId();
+  const open = useOpenPerson();
+  const editing = useRecordEditing();
+  const isNew = personId === NEW_RECORD;
   const queryClient = useQueryClient();
   const row = rows.find((r) => r.id === personId) ?? null;
   const { data, isLoading, isError } = useQuery<PersonRecord>({
     // The company is part of the key: moving them to another company refetches the panel.
     queryKey: ["person-record", personId, row?.company?.id ?? null],
     queryFn: () => loadPersonRecord(personId),
-    enabled: Boolean(personId),
+    enabled: Boolean(personId) && !isNew,
     staleTime: 0,
     placeholderData: keepPreviousData,
   });
   const ready = Boolean(row && data && data.id === row.id);
+  const form = canEdit && (isNew || (editing && row));
   const reload = () => void queryClient.invalidateQueries({ queryKey: ["person-record", personId] });
 
   return (
@@ -69,11 +94,38 @@ export function PersonPanel({ rows, companies, owners, canEdit }: { rows: Person
       scope="People"
       noun="person"
       storageKey="person-panel-width"
-      title={row?.name}
-      isLoading={(isLoading || Boolean(personId)) && !ready && !isError}
-      error={isError ? { title: "Couldn't load this person", description: "They may have been archived, or you can't see Sales." } : null}
+      title={isNew ? "New person" : row?.name}
+      isLoading={!form && (isLoading || Boolean(personId)) && !ready && !isError}
+      error={!form && isError ? { title: "Couldn't load this person", description: "They may have been archived, or you can't see Sales." } : null}
     >
-      {ready && row && data && <PersonRecordView key={row.id} row={row} record={data} companies={companies} owners={owners} canEdit={canEdit} onChanged={reload} />}
+      {form ? (
+        <PersonForm
+          key={row?.id ?? NEW_RECORD}
+          person={row ?? undefined}
+          options={options}
+          defaultCompanyId={defaultCompanyId}
+          onSaved={(id) => {
+            open(id);
+            reload();
+          }}
+          onCancel={() => open(row?.id ?? null)}
+        />
+      ) : (
+        ready &&
+        row &&
+        data && (
+          <PersonRecordView
+            key={row.id}
+            row={row}
+            record={data}
+            companies={companies}
+            owners={owners}
+            canEdit={canEdit}
+            onEdit={() => open(row.id, { edit: true })}
+            onChanged={reload}
+          />
+        )
+      )}
     </RecordPanel>
   );
 }
@@ -84,6 +136,7 @@ function PersonRecordView({
   companies,
   owners,
   canEdit,
+  onEdit,
   onChanged,
 }: {
   row: PersonRow;
@@ -91,6 +144,7 @@ function PersonRecordView({
   companies: Ref[];
   owners: Ref[];
   canEdit: boolean;
+  onEdit: () => void;
   onChanged: () => void;
 }) {
   const [tab, setTab] = useState("overview");
@@ -122,6 +176,13 @@ function PersonRecordView({
       icon="user"
       title={row.name}
       meta={<span className="truncate">{[row.jobTitle, row.company?.name].filter(Boolean).join(" · ") || "No company"}</span>}
+      actions={
+        canEdit && (
+          <Button type="button" variant="tertiary" size="sm" onClick={onEdit}>
+            Edit person
+          </Button>
+        )
+      }
       tabs={tabs}
       tab={tab}
       onTab={setTab}
@@ -278,6 +339,7 @@ function Overview({
             field("email", "Email", "email", row.email),
             field("phone", "Phone", "phone", row.phone),
             field("jobTitle", "Job title", "text", row.jobTitle),
+            field("country", "Country", "ref", row.country, COUNTRY_REFS),
             field("companyId", "Company", "ref", row.company?.id ?? null, companies),
             field("ownerId", "Owner", "ref", row.owner?.id ?? null, owners),
             ["Added", formatDate(row.createdOn)],

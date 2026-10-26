@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   amountToInput,
+  formatMonthAbbr,
   formatAmountInput,
   formatDate,
   formatDuration,
@@ -75,5 +76,13 @@ describe("formatClock", () => {
   it("prints 12-hour times", async () => {
     const { formatClock } = await import("./format");
     expect(["00:05", "09:00", "12:30", "15:00"].map(formatClock)).toEqual(["12:05 AM", "9:00 AM", "12:30 PM", "3:00 PM"]);
+  });
+});
+
+describe("formatMonthAbbr", () => {
+  it("gives a month's three-letter name", () => {
+    expect(formatMonthAbbr("2026-09-01")).toBe("Sep");
+    expect(formatMonthAbbr("2026-06-15")).toBe("Jun");
+    expect(formatMonthAbbr(null)).toBe("—");
   });
 });

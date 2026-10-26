@@ -44,7 +44,8 @@ const create = (path: string) => `${path}${path.includes("?") ? "&" : "?"}${CREA
 const ACTIONS: PaletteAction[] = [
   { label: "Log time…", icon: "time", href: create("/timesheet"), allowed: () => true },
   { label: "Create project…", icon: "projects", href: create("/projects"), allowed: perms.createProjects },
-  { label: "Create client…", icon: "clients", href: create("/clients"), allowed: perms.editClients },
+  // A new client opens in the client panel, like a new company.
+  { label: "Create client…", icon: "clients", href: "/clients?client=new", allowed: perms.editClients },
   { label: "Create invoice…", icon: "invoices", href: "/invoices/new", allowed: perms.editInvoices },
   { label: "Invite person…", icon: "invite", href: create("/people"), allowed: perms.managePeople },
 ];

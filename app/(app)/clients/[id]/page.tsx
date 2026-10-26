@@ -34,12 +34,12 @@ export default async function ClientPage({
   const client = await getClient(user, id);
   if (!client) notFound();
   const canEdit = perms.editClients(user);
-  // Sales works the client as an account (deals, people, notes); delivery (projects) is the PM's.
+  // Sales opens the client as an account first (notes, deals, people).
   const salesView = user.role === "sales";
   const showSales = perms.viewPipeline(user);
   const sales = showSales ? await getClientSales(user, client.id) : null;
   const mail = sales ? await crmMail(user, { companyId: sales.company?.id, personIds: sales.people.map((p) => p.id) }) : [];
-  const canCreateProject = perms.createProjects(user) && !client.isArchived && !salesView;
+  const canCreateProject = perms.createProjects(user) && !client.isArchived;
   const [clients, pms, settings] = canCreateProject
     ? await Promise.all([clientOptions(user), activePeopleOptions(user, ["pm", "c_level"]), getSettings()])
     : [[], [], null];
@@ -101,7 +101,7 @@ export default async function ClientPage({
         <EntityTabs
           initial={tab ?? (salesView ? "notes" : undefined)}
           items={[
-            ...(salesView ? [] : [{ value: "projects", label: "Projects", count: client.projects.length, content: <ClientProjects projects={client.projects} /> }]),
+            { value: "projects", label: "Projects", count: client.projects.length, content: <ClientProjects projects={client.projects} /> },
             ...(sales
               ? [
                   {

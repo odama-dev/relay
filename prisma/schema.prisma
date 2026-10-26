@@ -117,6 +117,15 @@ enum CorrectionStatus {
   @@map("correction_status")
 }
 
+/// A client's payment status: derived from its pending payment requests, or set by hand.
+enum ClientPaymentStatus {
+  on_track
+  due_soon
+  late
+
+  @@map("client_payment_status")
+}
+
 enum InvoiceStatus {
   draft
   sent
@@ -443,20 +452,24 @@ model JobRun {
 // ---------------------------------------------------------------------------
 
 model Client {
-  id              String   @id @default(uuid()) @db.Uuid
-  /// 2–6 uppercase letters, e.g. ACME. Locked once the client has a project.
-  code            String   @unique
-  name            String   @unique
-  country         String?
-  timezone        String?
-  defaultCurrency String   @default("IDR") @map("default_currency")
-  billingEmail    String?  @map("billing_email")
-  billingAddress  String?  @map("billing_address")
-  notes           String?
-  isArchived      Boolean  @default(false) @map("is_archived")
-  createdBy       String?  @map("created_by") @db.Uuid
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  id                      String               @id @default(uuid()) @db.Uuid
+  /// 2–3 uppercase letters for a new client, e.g. ACM (older codes may be up to 6). Locked once the client has a project.
+  code                    String               @unique
+  name                    String               @unique
+  country                 String?
+  timezone                String?
+  defaultCurrency         String               @default("IDR") @map("default_currency")
+  billingEmail            String?              @map("billing_email")
+  billingAddress          String?              @map("billing_address")
+  notes                   String?
+  isArchived              Boolean              @default(false) @map("is_archived")
+  /// Set by hand; null follows the client's pending payment requests. By / at are stamped by clients_guard.
+  paymentStatusOverride   ClientPaymentStatus? @map("payment_status_override")
+  paymentStatusOverrideBy String?              @map("payment_status_override_by") @db.Uuid
+  paymentStatusOverrideAt DateTime?            @map("payment_status_override_at") @db.Timestamptz
+  createdBy               String?              @map("created_by") @db.Uuid
+  createdAt               DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt               DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   creator    Profile?        @relation(fields: [createdBy], references: [id])
   contacts   ClientContact[]
@@ -1863,6 +1876,8 @@ model PipelineStage {
   isHidden    Boolean       @default(false) @map("is_hidden")
   /// "contacted" / "replied": the stage email moves deals into (set by the system).
   autoKey     String?       @unique @map("auto_key")
+  /// The board dot's colour (CRM option palette); null follows the category.
+  color       String?
   createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz
 
   deals          Deal[] @relation("DealStage")
@@ -2095,17 +2110,35 @@ model CrmAttribute {
 
 /// An organisation Sales talks to — a prospect or a client (`clientId`).
 model CrmCompany {
-  id          String    @id @default(uuid()) @db.Uuid
-  name        String
-  domain      String?
-  description String?
-  ownerId     String?   @map("owner_id") @db.Uuid
-  clientId    String?   @unique @map("client_id") @db.Uuid
-  values      Json      @default("{}")
-  createdBy   String?   @map("created_by") @db.Uuid
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
-  archivedAt  DateTime? @map("archived_at") @db.Timestamptz
+  id               String    @id @default(uuid()) @db.Uuid
+  name             String
+  /// The primary domain: always `domains[1]` (crm_companies_lists trigger).
+  domain           String?
+  domains          String[]  @default([])
+  description      String?
+  /// A world-map name from lib/geo/countries.ts: the country tracker counts it.
+  country          String?
+  categories       String[]  @default([])
+  angellist        String?
+  facebook         String?
+  instagram        String?
+  linkedin         String?
+  twitter          String?
+  twitterFollowers Int?      @map("twitter_followers")
+  /// A range code from lib/crm/pure.ts (ARR_RANGES).
+  estimatedArr     String?   @map("estimated_arr")
+  fundingRaised    Decimal?  @map("funding_raised") @db.Decimal(18, 2)
+  fundingCurrency  String?   @map("funding_currency")
+  foundedOn        DateTime? @map("founded_on") @db.Date
+  /// A range code from lib/crm/pure.ts (EMPLOYEE_RANGES).
+  employeeRange    String?   @map("employee_range")
+  ownerId          String?   @map("owner_id") @db.Uuid
+  clientId         String?   @unique @map("client_id") @db.Uuid
+  values           Json      @default("{}")
+  createdBy        String?   @map("created_by") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  archivedAt       DateTime? @map("archived_at") @db.Timestamptz
 
   client  Client?       @relation(fields: [clientId], references: [id], onDelete: SetNull)
   owner   Profile?      @relation("CrmCompanyOwner", fields: [ownerId], references: [id], onDelete: SetNull)
@@ -2120,18 +2153,29 @@ model CrmCompany {
 
 /// A contact — on its own or at a company.
 model CrmPerson {
-  id         String    @id @default(uuid()) @db.Uuid
-  name       String
-  email      String?
-  phone      String?
-  jobTitle   String?   @map("job_title")
-  companyId  String?   @map("company_id") @db.Uuid
-  ownerId    String?   @map("owner_id") @db.Uuid
-  values     Json      @default("{}")
-  createdBy  String?   @map("created_by") @db.Uuid
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
-  archivedAt DateTime? @map("archived_at") @db.Timestamptz
+  id               String    @id @default(uuid()) @db.Uuid
+  name             String
+  /// The primary email / phone: always `emails[1]` / `phones[1]` (crm_people_lists trigger).
+  email            String?
+  emails           String[]  @default([])
+  phone            String?
+  phones           String[]  @default([])
+  description      String?
+  jobTitle         String?   @map("job_title")
+  country          String?
+  angellist        String?
+  facebook         String?
+  instagram        String?
+  linkedin         String?
+  twitter          String?
+  twitterFollowers Int?      @map("twitter_followers")
+  companyId        String?   @map("company_id") @db.Uuid
+  ownerId          String?   @map("owner_id") @db.Uuid
+  values           Json      @default("{}")
+  createdBy        String?   @map("created_by") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  archivedAt       DateTime? @map("archived_at") @db.Timestamptz
 
   company CrmCompany?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
   owner   Profile?      @relation("CrmPersonOwner", fields: [ownerId], references: [id], onDelete: SetNull)

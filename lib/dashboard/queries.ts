@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import type { HrEventColor, InvoiceStatus, LeaveKind, PaymentRequestStatus, ProjectKind, ProjectStatus, Prisma, TaskPriority, TaskStatus, UserRole } from "@prisma/client";
+import type { ClientPaymentStatus, HrEventColor, InvoiceStatus, LeaveKind, PaymentRequestStatus, ProjectKind, ProjectStatus, Prisma, TaskPriority, TaskStatus, UserRole } from "@prisma/client";
 import { asUser, type CurrentUser } from "@/lib/auth";
 import { num, numOr0 } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
@@ -15,7 +15,8 @@ import { billableMinutes as billableMinutesOf, capacityHours as capacityHours_, 
 import { capacityInputs, holidaySet } from "@/lib/metrics/queries";
 import { onTimeInputs } from "@/lib/tasks/timing";
 import { addDays, addMonths, isoDate, isoWeekday, monthStart, parseIsoDate, todayIn, weekDays, weekStart, type IsoDate } from "@/lib/time/pure";
-import { daysLate, onTimeRate, PROJECT_STANDINGS, projectStanding, requestDueState, sumByCurrency, taskRisk, utilizationPct, type DueState, type Money, type ProjectStanding, type WorkPeriod } from "@/lib/dashboard/pure";
+import { DEFAULT_REPORT_RANGE, REPORT_RANGES, type ReportRange } from "@/lib/sales/pure";
+import { clientPaymentState, daysLate, onTimeRate, PROJECT_STANDINGS, projectStanding, requestDueState, sumByCurrency, taskRisk, utilizationPct, type ClientPaymentState, type DueState, type Money, type ProjectStanding, type WorkPeriod } from "@/lib/dashboard/pure";
 
 /**
  * Data for the dashboard cards (PRD/OVERVIEW-SPEC.md). One loader per card,
@@ -455,23 +456,42 @@ export async function loadMyInvoices(ctx: DashboardContext): Promise<MyInvoice[]
     .sort((a, b) => order[a.status] - order[b.status]);
 }
 
-/** SL-3 — clients with active / on-hold projects: project count and whether any payment is late. */
-export async function loadActiveClients(ctx: DashboardContext) {
+export type ActiveClient = {
+  id: string;
+  name: string;
+  projects: number;
+  /** What the table shows: the status set by hand, else the one from its open requests. */
+  payment: ClientPaymentState;
+  /** From the open requests alone, shown beside a status set by hand. */
+  autoPayment: ClientPaymentState;
+  manual: boolean;
+};
+
+const PAYMENT_ORDER: Record<ClientPaymentState, number> = { late: 0, due_soon: 1, on_track: 2, none: 3 };
+
+/** SL-3 — clients with active / on-hold projects: project count and payment status (late first). */
+export async function loadActiveClients(ctx: DashboardContext): Promise<ActiveClient[]> {
   const [projects, requests] = await Promise.all([
     asUser(ctx.user, (tx) =>
-      tx.project.findMany({ where: { kind: "client", status: { in: ACTIVE }, clientId: { not: null } }, select: { clientId: true, client: { select: { name: true } } } }),
+      tx.project.findMany({
+        where: { kind: "client", status: { in: ACTIVE }, clientId: { not: null } },
+        select: { clientId: true, client: { select: { name: true, paymentStatusOverride: true } } },
+      }),
     ),
     openRequests(ctx),
   ]);
-  const byClient = new Map<string, { id: string; name: string; projects: number }>();
+  const byClient = new Map<string, { id: string; name: string; projects: number; override: ClientPaymentStatus | null }>();
   for (const p of projects) {
-    const c = byClient.get(p.clientId!) ?? { id: p.clientId!, name: p.client?.name ?? "—", projects: 0 };
+    const c = byClient.get(p.clientId!) ?? { id: p.clientId!, name: p.client?.name ?? "—", projects: 0, override: p.client?.paymentStatusOverride ?? null };
     c.projects += 1;
     byClient.set(p.clientId!, c);
   }
   return [...byClient.values()]
-    .map((c) => ({ ...c, late: requests.some((r) => r.client.id === c.id && r.state === "late") }))
-    .sort((a, b) => Number(b.late) - Number(a.late) || a.name.localeCompare(b.name));
+    .map(({ override, ...c }) => {
+      const states = requests.filter((r) => r.client.id === c.id).map((r) => r.state);
+      return { ...c, payment: clientPaymentState(states, override), autoPayment: clientPaymentState(states), manual: override !== null };
+    })
+    .sort((a, b) => PAYMENT_ORDER[a.payment] - PAYMENT_ORDER[b.payment] || a.name.localeCompare(b.name));
 }
 
 /** SL-4 — active client projects with no invoice at all. */
@@ -487,12 +507,28 @@ export async function loadUninvoicedProjects(ctx: DashboardContext) {
 }
 
 /**
- * SL-0 — the sales strip and trend: invoiced vs collected per month (last six,
- * in IDR at indicative rates) and what isn't billed.
+ * SL-0 — the sales strip and trend: invoiced vs collected per month over the
+ * chosen range (3, 6, 12 months or all time; in IDR at indicative rates)
+ * and what isn't billed.
  * Collected uses the settled IDR when Xendit reported it.
  */
-export async function loadSalesSummary(ctx: DashboardContext) {
-  const months = Array.from({ length: 6 }, (_, i) => addMonths(ctx.monthStart, i - 5));
+export async function loadSalesSummary(ctx: DashboardContext, range: ReportRange = DEFAULT_REPORT_RANGE) {
+  const preset = REPORT_RANGES.find((r) => r.value === range)!;
+  // "All time" starts at the first sent invoice or payment; the strip always needs this month and the last.
+  let span: number = preset.months ?? 2;
+  if (preset.months === null) {
+    const first = await asUser(ctx.user, async (tx) => {
+      const [inv, pay] = await Promise.all([
+        tx.invoice.aggregate({ where: { status: { notIn: ["draft", "void"] } }, _min: { issueDate: true } }),
+        tx.payment.aggregate({ _min: { paidAt: true } }),
+      ]);
+      const days = [inv._min.issueDate && isoDate(inv._min.issueDate), pay._min.paidAt && localDay(ctx, pay._min.paidAt)].filter((d): d is IsoDate => Boolean(d));
+      return days.length ? monthStart(days.sort()[0]!) : null;
+    });
+    while (first && addMonths(ctx.monthStart, -(span - 1)) > first) span++;
+  }
+  const length = Math.max(2, span);
+  const months = Array.from({ length }, (_, i) => addMonths(ctx.monthStart, i - (length - 1)));
   const from = months[0]!;
   const { invoices, payments, uninvoiced, drafts } = await asUser(ctx.user, async (tx) => ({
     invoices: await tx.invoice.findMany({
@@ -518,8 +554,8 @@ export async function loadSalesSummary(ctx: DashboardContext) {
   });
   return {
     trend,
-    current: trend[5]!,
-    previous: trend[4]!,
+    current: trend.at(-1)!,
+    previous: trend.at(-2)!,
     uninvoiced,
     drafts,
     rateDate: rates?.date ?? null,

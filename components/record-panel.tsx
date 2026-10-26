@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ErrorState } from "@/components/states";
 import { Icon, type IconName } from "@/components/icon";
+import { stageColor } from "@/components/status-badge";
 import { usePanelWidth } from "@/components/tasks/use-panel-width";
 
 /**
@@ -20,16 +21,25 @@ import { usePanelWidth } from "@/components/tasks/use-panel-width";
  * left edge to resize, widen, or open the full page.
  */
 
-/** Opens (or with null, closes) the panel on `?<param>=<id>`, keeping the other params. */
+/** `?<param>=new` opens the panel on a blank record form instead of a record. */
+export const NEW_RECORD = "new";
+
+/**
+ * Opens (or with null, closes) the panel on `?<param>=<id>`, keeping the other
+ * params. `{ edit: true }` opens the record's edit form (`&edit=1`); any other
+ * move leaves it.
+ */
 export function useOpenRecord(param: string) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   return useCallback(
-    (id: string | null) => {
+    (id: string | null, opts?: { edit?: boolean }) => {
       const next = new URLSearchParams(params.toString());
       if (id) next.set(param, id);
       else next.delete(param);
+      if (id && opts?.edit) next.set("edit", "1");
+      else next.delete("edit");
       const qs = next.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
@@ -39,6 +49,11 @@ export function useOpenRecord(param: string) {
 
 export function useOpenRecordId(param: string) {
   return useSearchParams().get(param);
+}
+
+/** True while the open record shows its edit form (`&edit=1`). */
+export function useRecordEditing() {
+  return useSearchParams().get("edit") === "1";
 }
 
 export function RecordPanel({
@@ -160,10 +175,11 @@ export function RecordPanel({
 
 export type RecordTab = { value: string; label: string; count?: number; content: ReactNode };
 
-/** The record's header (icon, name, a line under it, actions) and its tabs; the body scrolls. */
+/** The record's header (icon, name with a badge beside it, a line under it, actions) and its tabs; the body scrolls. */
 export function RecordBody({
   icon,
   title,
+  badge,
   meta,
   actions,
   tabs,
@@ -172,6 +188,8 @@ export function RecordBody({
 }: {
   icon: IconName;
   title: string;
+  /** Sits beside the name, e.g. a stage or status badge. */
+  badge?: ReactNode;
   meta?: ReactNode;
   actions?: ReactNode;
   tabs: RecordTab[];
@@ -181,18 +199,11 @@ export function RecordBody({
   const idPrefix = useId();
   const selected = Math.max(0, tabs.findIndex((t) => t.value === tab));
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="flex items-center gap-3 px-6 pt-5 pb-3">
-        <span className="bg-surface-3 shadow-surface-2 text-muted-foreground grid size-9 shrink-0 place-items-center rounded-lg">
-          <Icon name={icon} size={18} />
-        </span>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <h2 className="truncate text-[20px] leading-[25px] font-medium">{title}</h2>
-          {meta && <span className="text-muted-foreground flex min-w-0 items-center gap-2 text-caption">{meta}</span>}
-        </div>
-        {actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
-      </div>
-      <div className="overflow-x-auto border-b px-6 pb-2">
+    // A tab's filling EmptyState centres in the space under the tabs (globals.css);
+    // @container lets tab content re-flow when the panel is widened.
+    <div data-empty-scope className="@container flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <RecordHeader icon={icon} title={title} badge={badge} meta={meta} actions={actions} />
+      <div className="shrink-0 overflow-x-auto border-b px-6 pb-2">
         <TabsSubtle selectedIndex={selected} onSelect={(i) => onTab(tabs[i].value)} idPrefix={idPrefix}>
           {tabs.map((t, i) => (
             <TabsSubtleItem key={t.value} index={i} label={t.count != null ? `${t.label} ${t.count}` : t.label} />
@@ -207,6 +218,59 @@ export function RecordBody({
         ))}
       </div>
     </div>
+  );
+}
+
+function RecordHeader({ icon, title, badge, meta, actions }: { icon: IconName; title: string; badge?: ReactNode; meta?: ReactNode; actions?: ReactNode }) {
+  return (
+    <div className="flex shrink-0 items-center gap-3 px-6 pt-5 pb-3">
+      <span className="bg-surface-3 shadow-surface-2 text-muted-foreground grid size-9 shrink-0 place-items-center rounded-lg">
+        <Icon name={icon} size={18} />
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 items-center gap-2">
+          <h2 className="truncate text-[20px] leading-[25px] font-medium">{title}</h2>
+          {badge && <span className="flex shrink-0 items-center">{badge}</span>}
+        </div>
+        {meta && <span className="text-muted-foreground flex min-w-0 items-center gap-2 text-caption">{meta}</span>}
+      </div>
+      {actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
+    </div>
+  );
+}
+
+/**
+ * A record's create / edit form inside the panel: the same header as the
+ * record, the fields scrolling under it, and the buttons pinned to the bottom.
+ * `@container` lets field rows re-flow with the panel's width.
+ */
+export function RecordForm({
+  icon,
+  title,
+  badge,
+  meta,
+  onSubmit,
+  footer,
+  children,
+}: {
+  icon: IconName;
+  title: string;
+  badge?: ReactNode;
+  meta?: ReactNode;
+  onSubmit: React.FormEventHandler<HTMLFormElement>;
+  footer: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <form onSubmit={onSubmit} noValidate className="@container flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="border-b">
+          <RecordHeader icon={icon} title={title} badge={badge} meta={meta} />
+        </div>
+        <div className="flex flex-col gap-5 px-6 py-5">{children}</div>
+      </div>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-t px-6 py-3">{footer}</div>
+    </form>
   );
 }
 
@@ -245,15 +309,21 @@ export function Highlight({ label, icon, onClick, children }: { label: string; i
 
 export const HighlightEmpty = ({ children }: { children: ReactNode }) => <span className="text-muted-foreground">{children}</span>;
 
-/** A deal's stage as segments along the visible board; Lost reads red. */
-export function StageProgress({ stages, current }: { stages: { name: string; category: string }[]; current: string }) {
-  const lost = stages.find((s) => s.name === current)?.category === "lost";
+/** A deal's stage as segments along the visible board, in the current stage's hue (its dot's); the rest of the track is that hue at 5%. Lost reads red. */
+export function StageProgress({ stages, current }: { stages: { name: string; category: string; color?: string | null }[]; current: string }) {
+  const at = stages.find((s) => s.name === current);
+  const lost = at?.category === "lost";
   const track = stages.filter((s) => s.category !== "lost");
   const reached = lost ? -1 : track.findIndex((s) => s.name === current);
+  const hue = at ? stageColor(at) : "var(--foreground)";
   return (
     <span className="mt-1 flex gap-1" aria-hidden>
       {track.map((s, i) => (
-        <span key={s.name} className={cn("h-1 flex-1 rounded-full", lost ? "bg-destructive/40" : i <= reached ? "bg-foreground/60" : "bg-foreground/10")} />
+        <span
+          key={s.name}
+          className={cn("h-1 flex-1 rounded-full", lost && "bg-destructive/40")}
+          style={lost ? undefined : { backgroundColor: i <= reached ? hue : `color-mix(in oklab, ${hue} 5%, transparent)` }}
+        />
       ))}
     </span>
   );

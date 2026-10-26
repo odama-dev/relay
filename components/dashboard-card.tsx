@@ -7,12 +7,15 @@ import { TextLink } from "@/components/text-link";
 import { RefreshButton } from "@/components/refresh-button";
 
 /** Desktop width on the 12-column grid (PRD/OVERVIEW-SPEC.md §1.6). Mobile is always one column. */
-export type CardSpan = "full" | "wide" | "narrow";
+export type CardSpan = "full" | "major" | "wide" | "half" | "narrow" | "minor";
 
 const SPAN: Record<CardSpan, string> = {
   full: "lg:col-span-12",
+  major: "lg:col-span-9",
   wide: "lg:col-span-8",
+  half: "lg:col-span-6",
   narrow: "lg:col-span-4",
+  minor: "lg:col-span-3",
 };
 
 export function DashboardGrid({ children }: { children: ReactNode }) {
@@ -73,7 +76,7 @@ export function DashboardCard({
       aria-busy={state === "loading" || undefined}
       className={cn("bg-surface-3 shadow-surface-2 flex min-w-0 flex-col gap-3 overflow-hidden rounded-xl p-4 [--page-gutter:1rem]", SPAN[span], className)}
     >
-      <header className="flex min-h-[24px] items-center justify-between gap-3">
+      <header className="flex min-h-[24px] flex-wrap items-center justify-between gap-3">
         <h2 className="text-subtitle flex min-w-0 items-center gap-2 font-semibold">
           <span className="truncate">{title}</span>
           {state === "ready" && count != null && count > 0 && (

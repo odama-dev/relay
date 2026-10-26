@@ -1,32 +1,33 @@
 import { requireAccess } from "@/lib/auth";
 import { perms } from "@/lib/roles";
-import { formatDate, formatMoney, formatMonth } from "@/lib/format";
-import { loadSalesInsights, loadSalesReport } from "@/lib/sales/queries";
-import { addMonths, isIsoDate, monthStart, todayIn } from "@/lib/time/pure";
-import { PeriodFilter } from "@/components/period-filter";
+import { formatDate, formatMoney, formatMonth, formatMonthAbbr } from "@/lib/format";
+import { loadCompanyCountries, loadFirstLeadDate, loadSalesInsights, loadSalesReport } from "@/lib/sales/queries";
+import { reportPeriod } from "@/lib/sales/pure";
+import { MAP_HEIGHT, MAP_WIDTH, worldMap } from "@/lib/geo/world-map";
+import { isIsoDate, todayIn } from "@/lib/time/pure";
+import { ReportPeriodFilter } from "@/components/sales/report-period-filter";
 import { PageHeader } from "@/components/page-header";
 import { LinkButton } from "@/components/link-button";
 import { DashboardCard, DashboardGrid } from "@/components/dashboard-card";
-import { ParamSelect } from "@/components/param-select";
-import { BridgeChart, CandleChart, FunnelChart, SourceChart, WonByMonthChart } from "@/components/sales/pipeline-charts";
+import { CandleChart, FunnelChart, SourceChart, WonByMonthChart } from "@/components/sales/pipeline-charts";
+import { CountryMap } from "@/components/sales/country-map";
 
 export const metadata = { title: "Sales report" };
 
 /**
- * Sales report: the funnel and lead sources over the leads that came in
- * within the period, money won per month, then the open pipeline's candles
- * (daily snapshots) and a month's bridge (stage history). All in IDR.
+ * Sales report: the funnel and lead sources over every lead, client
+ * countries, then money won per month and the open pipeline's candles (daily
+ * snapshots) side by side for the period — a preset (3M, 6M, 1Y, All time)
+ * or a custom date range, which scopes only those two. All in IDR.
  */
-export default async function SalesReportPage({ searchParams }: { searchParams: Promise<{ month?: string; from?: string; to?: string }> }) {
+export default async function SalesReportPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string }> }) {
   const user = await requireAccess(perms.viewPipeline);
   const sp = await searchParams;
   const today = todayIn(user.timezone);
   const iso = (v?: string) => (v && isIsoDate(v) ? v : undefined);
-  const from = iso(sp.from) ?? addMonths(monthStart(today), -5);
-  const to = iso(sp.to) ?? today;
-  const [report, insights] = await Promise.all([loadSalesReport(user, 6), loadSalesInsights(user, from, to)]);
-  const latest = report.bridges.at(-1)!;
-  const bridge = report.bridges.find((b) => b.month === sp.month) ?? latest;
+  const period = reportPeriod({ range: sp.range, from: iso(sp.from), to: iso(sp.to) }, today, sp.range === "all" ? await loadFirstLeadDate(user) : null);
+  const { from, to } = period;
+  const [report, insights, countries] = await Promise.all([loadSalesReport(user, from, to), loadSalesInsights(user, from, to), loadCompanyCountries(user)]);
   const wonTotal = insights.won.reduce((s, m) => s + m.valueIdr, 0);
 
   return (
@@ -36,7 +37,6 @@ export default async function SalesReportPage({ searchParams }: { searchParams: 
         compact
         actions={
           <>
-            <PeriodFilter from={sp.from} to={sp.to} label="Report period" placeholder="Last 6 months" />
             <LinkButton variant="ghost" size="sm" icon="trend" href="/sales">
               Pipeline
             </LinkButton>
@@ -47,21 +47,45 @@ export default async function SalesReportPage({ searchParams }: { searchParams: 
         <DashboardGrid>
           <DashboardCard
             title="Funnel"
+            span="major"
+            className="lg:h-[75vh]"
             isEmpty={insights.leads === 0}
-            emptyText="No leads came in during this period."
+            emptyText="No leads yet."
             emptyIcon="target"
           >
-            <FunnelChart steps={insights.funnel} />
+            <FunnelChart steps={insights.funnel} className="flex-1" />
             <p className="text-muted-foreground text-caption">
-              {insights.leads} lead{insights.leads === 1 ? "" : "s"} in {formatDate(from)} – {formatDate(to)}. A deal counts at every step it reached, even one it skipped.
+              {insights.leads} lead{insights.leads === 1 ? "" : "s"}, all time. A deal counts at every step it reached, even one it skipped.
             </p>
           </DashboardCard>
-          <DashboardCard title="Lead sources" isEmpty={insights.sources.length === 0} emptyText="No leads came in during this period." emptyIcon="target">
-            <SourceChart rows={insights.sources} />
-            <p className="text-muted-foreground text-caption">Leads that came in during the period; win rate counts the closed ones.</p>
-          </DashboardCard>
-          <DashboardCard title={`Money won per month · ${formatMoney(wonTotal, "IDR", { compact: true })}`} span="full">
-            <WonByMonthChart data={insights.won.map((m) => ({ ...m, label: formatMonth(m.month).split(" ")[0]!, title: formatMonth(m.month) }))} />
+          <div className="flex flex-col gap-3 lg:col-span-3 lg:h-[75vh]">
+            <DashboardCard title="Lead sources" span="minor" className="lg:min-h-0 lg:flex-1" isEmpty={insights.sources.length === 0} emptyText="No leads yet." emptyIcon="target">
+              <SourceChart rows={insights.sources} className="min-h-0 flex-1" />
+            </DashboardCard>
+            <DashboardCard
+              title="Company countries"
+              span="minor"
+              className="lg:min-h-0 lg:flex-1"
+              isEmpty={countries.rows.length === 0}
+              emptyText="No company has a country yet."
+              emptyIcon="globe"
+            >
+              <CountryMap map={worldMap()} width={MAP_WIDTH} height={MAP_HEIGHT} rows={countries.rows} className="flex-1" />
+              {countries.unknown > 0 && (
+                <p className="text-muted-foreground text-caption">
+                  {countries.unknown} {countries.unknown === 1 ? "company has" : "companies have"} no country.
+                </p>
+              )}
+            </DashboardCard>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-3 lg:col-span-12">
+            <h2 className="text-subtitle font-semibold">
+              Over time <span className="text-muted-foreground font-normal">· {formatDate(from)} – {formatDate(to)}</span>
+            </h2>
+            <ReportPeriodFilter range={period.range} from={iso(sp.from)} to={iso(sp.to)} />
+          </div>
+          <DashboardCard title={`Money won per month · ${formatMoney(wonTotal, "IDR", { compact: true })}`} span="half" className="self-stretch">
+            <WonByMonthChart data={insights.won.map((m) => ({ ...m, label: formatMonthAbbr(m.month), title: formatMonth(m.month) }))} />
             <p className="text-muted-foreground text-caption">
               Value of deals moved to a Won stage, by the month they closed, in IDR at the reference rate.
               {insights.unconverted > 0 && ` ${insights.unconverted} deal${insights.unconverted === 1 ? " has" : "s have"} a currency without a rate and ${insights.unconverted === 1 ? "isn't" : "aren't"} counted.`}
@@ -69,28 +93,14 @@ export default async function SalesReportPage({ searchParams }: { searchParams: 
           </DashboardCard>
           <DashboardCard
             title="Open pipeline per month"
-            span="full"
+            span="half"
+            className="self-stretch"
             isEmpty={report.candles.length === 0}
             emptyText="Recorded daily from now on. Candles appear after the first snapshot — earlier months can't be rebuilt."
             emptyIcon="trend"
           >
-            <CandleChart data={report.candles.map((c) => ({ ...c, label: formatMonth(c.month).split(" ")[0]!, title: formatMonth(c.month) }))} />
+            <CandleChart data={report.candles.map((c) => ({ ...c, label: formatMonthAbbr(c.month), title: formatMonth(c.month) }))} />
             {report.firstSnapshot && <p className="text-muted-foreground text-caption">Daily snapshots since {formatDate(report.firstSnapshot)}.</p>}
-          </DashboardCard>
-          <DashboardCard
-            title={`Pipeline bridge · ${formatMonth(bridge.month)}`}
-            span="full"
-            action={
-              <ParamSelect
-                param="month"
-                ariaLabel="Bridge month"
-                value={bridge.month}
-                defaultValue={latest.month}
-                options={[...report.bridges].reverse().map((b) => ({ value: b.month, label: formatMonth(b.month) }))}
-              />
-            }
-          >
-            <BridgeChart bridge={bridge} />
           </DashboardCard>
         </DashboardGrid>
       </div>

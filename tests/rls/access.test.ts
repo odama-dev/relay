@@ -67,7 +67,7 @@ beforeAll(async () => {
 
   // Sales creates the client and both client projects through RLS (M1.1, M1.2).
   const created = await as("sales", async (tx) => {
-    const client = await tx.client.create({ data: { code: "ACME", name: "Acme Corp", createdBy: ids.sales } });
+    const client = await tx.client.create({ data: { code: "ACM", name: "Acme Corp", createdBy: ids.sales } });
     const a = await tx.project.create({
       data: {
         name: "Website",
@@ -134,7 +134,7 @@ describe("database setup", () => {
 describe("M1 — clients & projects", () => {
   it("numbers projects per client and internal projects as INT", async () => {
     const codes = await prisma.project.findMany({ orderBy: { createdAt: "asc" }, select: { code: true } });
-    expect(codes.map((c) => c.code)).toEqual(["ACME-001", "ACME-002", "INT-001"]);
+    expect(codes.map((c) => c.code)).toEqual(["ACM-001", "ACM-002", "INT-001"]);
     expect((await prisma.project.findUniqueOrThrow({ where: { id: internal } })).clientId).toBeNull();
   });
 
@@ -144,8 +144,40 @@ describe("M1 — clients & projects", () => {
   });
 
   it("locks the client code once the client has projects", async () => {
-    const msg = await denied(as("sales", (tx) => tx.client.update({ where: { id: clientId }, data: { code: "ACMX" } })));
+    const msg = await denied(as("sales", (tx) => tx.client.update({ where: { id: clientId }, data: { code: "ACX" } })));
     expect(msg).toMatch(/client code/);
+  });
+
+  it("takes 2–3 letters for a new client code, and keeps an older code on its client", async () => {
+    expect(await denied(as("sales", (tx) => tx.client.create({ data: { code: "ABCD", name: "Four Letters" } })))).toMatch(/2–3 letters/);
+    expect(await denied(as("sales", (tx) => tx.client.create({ data: { code: "A1", name: "With Digit" } })))).toMatch(/2–3 letters|client_code_format|check/);
+    // A client from before the rule (written with triggers off, as the old rule allowed).
+    const legacy = randomUUID();
+    await prisma.$transaction([
+      prisma.$executeRawUnsafe(`SET LOCAL session_replication_role = replica`),
+      prisma.$executeRaw`INSERT INTO public.clients (id, code, name, updated_at) VALUES (${legacy}::uuid, 'OLDC', 'Old Code Co', now())`,
+    ]);
+    await as("sales", (tx) => tx.client.update({ where: { id: legacy }, data: { name: "Old Code Company" } }));
+    expect(await denied(as("sales", (tx) => tx.client.update({ where: { id: legacy }, data: { code: "OLDX" } })))).toMatch(/2–3 letters/);
+    await as("sales", (tx) => tx.client.update({ where: { id: legacy }, data: { code: "OLD" } }));
+    await prisma.client.delete({ where: { id: legacy } });
+  });
+
+  it("stamps who set a client's payment status by hand, and only client editors may", async () => {
+    await as("sales", (tx) => tx.client.update({ where: { id: clientId }, data: { paymentStatusOverride: "late", paymentStatusOverrideBy: ids.dev } }));
+    const set = await prisma.client.findUniqueOrThrow({ where: { id: clientId } });
+    expect(set.paymentStatusOverride).toBe("late");
+    expect(set.paymentStatusOverrideBy).toBe(ids.sales);
+    expect(set.paymentStatusOverrideAt).not.toBeNull();
+
+    expect(await as("dev", (tx) => tx.client.updateMany({ where: { id: clientId }, data: { paymentStatusOverride: "on_track" } }))).toEqual({ count: 0 });
+    // The stamp can't be rewritten on its own.
+    await as("pm", (tx) => tx.client.update({ where: { id: clientId }, data: { paymentStatusOverrideBy: ids.pm } }));
+    expect((await prisma.client.findUniqueOrThrow({ where: { id: clientId } })).paymentStatusOverrideBy).toBe(ids.sales);
+
+    await as("sales", (tx) => tx.client.update({ where: { id: clientId }, data: { paymentStatusOverride: null } }));
+    const cleared = await prisma.client.findUniqueOrThrow({ where: { id: clientId } });
+    expect([cleared.paymentStatusOverride, cleared.paymentStatusOverrideBy, cleared.paymentStatusOverrideAt]).toEqual([null, null, null]);
   });
 
   it("shows Designer & Dev only the projects they are on", async () => {

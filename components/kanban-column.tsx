@@ -17,6 +17,7 @@ export function KanbanColumn({
   itemIds,
   isTarget = false,
   tone,
+  color,
   aside,
   children,
 }: {
@@ -25,6 +26,8 @@ export function KanbanColumn({
   label: string;
   /** Status value the dot's colour follows, when `status` isn't one (e.g. a stage's category). */
   tone?: string;
+  /** A colour of its own for the dot (CSS), over `tone` (e.g. a pipeline stage's). */
+  color?: string;
   /** Right of the count, e.g. the column's total value. */
   aside?: ReactNode;
   /** Card ids in display order — drives in-column sorting. */
@@ -45,7 +48,7 @@ export function KanbanColumn({
       )}
     >
       <div className="flex h-8 items-center gap-2 px-2">
-        <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: statusColor(tone ?? status) }} />
+        <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: color ?? statusColor(tone ?? status) }} />
         <h3 className="truncate text-body font-semibold">{label}</h3>
         <span
           className={cn(

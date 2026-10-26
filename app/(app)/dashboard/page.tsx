@@ -42,7 +42,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     return (
       <>
         {user.role === "sales" ? (
-          <SalesDashboard user={user} />
+          <SalesDashboard user={user} searchParams={sp} />
         ) : user.role === "pm" ? (
           <PmDashboard user={user} searchParams={sp} />
         ) : user.role === "hr" ? (

@@ -3,17 +3,18 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
-import { asUser, requireUser } from "@/lib/auth";
+import { asUser, requireUser, type CurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { run, fail, parseOrFail, type ActionResult } from "@/lib/actions";
 import { logActivity } from "@/lib/audit";
 import { perms } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
-import { parseIsoDate } from "@/lib/time/pure";
+import { parseIsoDate, todayIn } from "@/lib/time/pure";
 import { parseCsv } from "@/lib/import/csv";
 import { validateDeals, type DealImportRow } from "@/lib/sales/import";
-import { clientCodeSchema, dealMoveSchema, dealSchema, stageSchema, uuid } from "@/lib/validation";
+import { dealMoveSchema, dealSchema, stageSchema, uuid } from "@/lib/validation";
 import { getDealRecord, type DealRecord } from "@/lib/sales/record";
+import { projectForWonDeal, type WonProject } from "@/lib/sales/won";
 
 /**
  * Phase 2 · M9 — pipeline and deals. Writes run under RLS (Sales module);
@@ -36,6 +37,27 @@ function revalidateSales() {
   revalidatePath("/sales/report");
   revalidatePath("/dashboard");
 }
+
+/** What a won deal needs to become a project (see projectForWonDeal). */
+async function wonContext(user: CurrentUser) {
+  const settings = await getSettings();
+  return { today: todayIn(user.timezone), thresholds: settings.default_alert_thresholds };
+}
+
+/** A deal just won became a client and a project: record it and refresh the screens that list them. */
+async function afterWon(user: CurrentUser, dealId: string, won: WonProject | null) {
+  if (!won) return null;
+  if (won.clientCreated) {
+    await logActivity({ actorId: user.id, entityType: "client", entityId: won.clientId, action: "created", metadata: { code: won.clientCode, fromDeal: dealId } });
+  }
+  await logActivity({ actorId: user.id, entityType: "project", entityId: won.id, action: "created", metadata: { code: won.code, fromDeal: dealId } });
+  revalidatePath("/clients");
+  revalidatePath("/projects");
+  revalidatePath("/invoices/new");
+  return { id: won.id, code: won.code };
+}
+
+export type WonResult = { project: { id: string; code: string } | null };
 
 /**
  * The form's fields, plus the client and prospect name that follow the
@@ -74,54 +96,64 @@ async function dealData(tx: Prisma.TransactionClient, d: z.output<typeof dealSch
   };
 }
 
-export async function createDeal(raw: unknown): Promise<ActionResult<{ id: string }>> {
+export async function createDeal(raw: unknown): Promise<ActionResult<{ id: string } & WonResult>> {
   return run(async () => {
     const user = await requireUser();
     if (!perms.manageDeals(user)) fail(FORBIDDEN);
     const d = parseOrFail(dealSchema, raw);
-    const deal = await asUser(user, async (tx) => {
+    const ctx = await wonContext(user);
+    const { deal, won } = await asUser(user, async (tx) => {
       const { data, probability } = await dealData(tx, d);
-      return tx.deal.create({ data: { ...data, probability } });
+      const deal = await tx.deal.create({ data: { ...data, probability } });
+      return { deal, won: await projectForWonDeal(tx, user, deal.id, ctx) };
     });
     await logActivity({ actorId: user.id, entityType: "deal", entityId: deal.id, action: "created", metadata: { title: d.title, value: d.value, currency: d.currency } });
     await advanceFromMail(d);
     revalidateSales();
-    return { id: deal.id };
+    return { id: deal.id, project: await afterWon(user, deal.id, won) };
   });
 }
 
-export async function updateDeal(id: unknown, raw: unknown): Promise<ActionResult> {
+export async function updateDeal(id: unknown, raw: unknown): Promise<ActionResult<WonResult>> {
   return run(async () => {
     const user = await requireUser();
     const dealId = parseOrFail(uuid, id);
     const d = parseOrFail(dealSchema, raw);
-    const res = await asUser(user, async (tx) => {
+    const ctx = await wonContext(user);
+    const { res, won } = await asUser(user, async (tx) => {
       const current = await tx.deal.findUnique({ where: { id: dealId }, select: { projectId: true, clientId: true } });
       if (!current) fail("Deal not found.");
       const { data } = await dealData(tx, d);
       // Once the deal has its project, the client stays put (deals_derive).
       if (current.projectId) Object.assign(data, { clientId: current.clientId, prospectName: null });
-      return tx.deal.updateMany({ where: { id: dealId }, data });
+      // A deal linked to a client keeps it when the form has no client's company.
+      else if (current.clientId && !data.clientId) Object.assign(data, { clientId: current.clientId, prospectName: null });
+      const res = await tx.deal.updateMany({ where: { id: dealId }, data });
+      return { res, won: res.count ? await projectForWonDeal(tx, user, dealId, ctx) : null };
     });
     if (res.count === 0) fail(FORBIDDEN);
     await logActivity({ actorId: user.id, entityType: "deal", entityId: dealId, action: "updated" });
     await advanceFromMail(d);
     revalidateSales();
+    return { project: await afterWon(user, dealId, won) };
   });
 }
 
-/** Drag to a stage. Lost needs a reason (deals_derive). */
-export async function moveDeal(id: unknown, raw: unknown): Promise<ActionResult> {
+/** Drag to a stage. Lost needs a reason (deals_derive); Won makes the client and project. */
+export async function moveDeal(id: unknown, raw: unknown): Promise<ActionResult<WonResult>> {
   return run(async () => {
     const user = await requireUser();
     const dealId = parseOrFail(uuid, id);
     const d = parseOrFail(dealMoveSchema, raw);
-    const res = await asUser(user, (tx) =>
-      tx.deal.updateMany({ where: { id: dealId }, data: { stageId: d.stageId, ...(d.lostReason ? { lostReason: d.lostReason } : {}) } }),
-    );
+    const ctx = await wonContext(user);
+    const { res, won } = await asUser(user, async (tx) => {
+      const res = await tx.deal.updateMany({ where: { id: dealId }, data: { stageId: d.stageId, ...(d.lostReason ? { lostReason: d.lostReason } : {}) } });
+      return { res, won: res.count ? await projectForWonDeal(tx, user, dealId, ctx) : null };
+    });
     if (res.count === 0) fail(FORBIDDEN);
     await logActivity({ actorId: user.id, entityType: "deal", entityId: dealId, action: "moved", metadata: { stageId: d.stageId } });
     revalidateSales();
+    return { project: await afterWon(user, dealId, won) };
   });
 }
 
@@ -143,29 +175,17 @@ export async function deleteDeal(id: unknown): Promise<ActionResult> {
   });
 }
 
-/**
- * Won deal with a prospect only: add the prospect as a client (code from
- * the user) and link it, so the project can be created for it.
- */
-export async function createClientFromDeal(id: unknown, rawCode: unknown): Promise<ActionResult<{ clientId: string }>> {
+/** A deal won before won deals became projects on their own: make its client and project now. */
+export async function createProjectFromDeal(id: unknown): Promise<ActionResult<WonResult>> {
   return run(async () => {
     const user = await requireUser();
-    if (!perms.editClients(user)) fail("Only PMs, Sales and C-Level add clients.");
+    if (!perms.manageDeals(user) || !perms.createProjects(user)) fail("Only Sales and C-Level turn a won deal into a project.");
     const dealId = parseOrFail(uuid, id);
-    const code = parseOrFail(clientCodeSchema, rawCode);
-    const clientId = await asUser(user, async (tx) => {
-      const deal = await tx.deal.findUnique({ where: { id: dealId }, select: { clientId: true, prospectName: true, currency: true } });
-      if (!deal) fail("Deal not found.");
-      if (deal.clientId) return deal.clientId;
-      if (await tx.client.findUnique({ where: { code }, select: { id: true } })) fail(`The code ${code} is taken. Choose another.`);
-      const client = await tx.client.create({ data: { code, name: deal.prospectName ?? "New client", defaultCurrency: deal.currency, createdBy: user.id } });
-      await tx.deal.update({ where: { id: dealId }, data: { clientId: client.id, prospectName: null } });
-      return client.id;
-    });
-    await logActivity({ actorId: user.id, entityType: "client", entityId: clientId, action: "created", metadata: { code, fromDeal: dealId } });
+    const ctx = await wonContext(user);
+    const won = await asUser(user, (tx) => projectForWonDeal(tx, user, dealId, ctx));
+    if (!won) fail("This deal isn't won, or it already has a project.");
     revalidateSales();
-    revalidatePath("/clients");
-    return { clientId };
+    return { project: await afterWon(user, dealId, won) };
   });
 }
 

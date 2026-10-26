@@ -2,10 +2,13 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import type { ClientRecord } from "@/lib/clients/record";
+import type { CURRENCIES } from "@/lib/validation";
 import { formatDate, formatMoney, formatRelative } from "@/lib/format";
-import { loadClientRecord } from "@/app/(app)/clients/actions";
+import { deleteClient, loadClientRecord, setClientArchived } from "@/app/(app)/clients/actions";
 import { ClientDeals, ClientInvoices, ClientPeople, ClientProjects } from "@/app/(app)/clients/[id]/client-lists";
 import { ContactsPanel } from "@/app/(app)/clients/[id]/contacts-panel";
 import { Button } from "@/components/ui/button";
@@ -14,16 +17,22 @@ import { DetailList } from "@/components/detail-list";
 import { MemberAvatar } from "@/components/member-avatar";
 import { NotesPanel } from "@/components/crm/notes-panel";
 import { MailActivity } from "@/components/mail/mail-activity";
+import { RowActions } from "@/components/row-actions";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ClientForm } from "@/components/clients/client-form";
+import { ProjectFormDialog } from "@/app/(app)/projects/project-form-dialog";
 import {
   ActivityList,
   Highlight,
   HighlightEmpty,
+  NEW_RECORD,
   PanelSection,
   RecordBody,
   RecordPanel,
   StageProgress,
   useOpenRecord,
   useOpenRecordId,
+  useRecordEditing,
   type ActivityItem,
   type RecordTab,
 } from "@/components/record-panel";
@@ -31,22 +40,31 @@ import {
 const PARAM = "client";
 const recordKey = (id: string | null) => ["client-record", id] as const;
 
-/** Opens the client panel mounted on this page (`?client=<id>`, see ClientPanel). */
+/** Opens the client panel mounted on this page (`?client=<id>`; `?client=new` for a new client; see ClientPanel). */
 export const useOpenClient = () => useOpenRecord(PARAM);
 /** The id of the client whose panel is open, if any. */
 export const useOpenClientId = () => useOpenRecordId(PARAM);
 
-/** A client as a side panel over the list it was opened from. Sales see the account (deal, people, notes, email) first. */
-export function ClientPanel({ ids = [], scope = "Clients" }: { ids?: string[]; scope?: string }) {
+/**
+ * A client as a side panel over the list it was opened from. Sales see the
+ * account (deal, people, notes, email) first. A new client (`?client=new`,
+ * with `canCreate`) and a client's edit form (`&edit=1`) open in the same panel.
+ */
+export function ClientPanel({ ids = [], scope = "Clients", canCreate = false }: { ids?: string[]; scope?: string; canCreate?: boolean }) {
   const clientId = useOpenClientId();
+  const open = useOpenClient();
+  const editing = useRecordEditing();
   const queryClient = useQueryClient();
+  const isNew = clientId === NEW_RECORD;
   const { data, isLoading, isError } = useQuery<ClientRecord>({
     queryKey: recordKey(clientId),
     queryFn: () => loadClientRecord(clientId),
-    enabled: Boolean(clientId),
+    enabled: Boolean(clientId) && !isNew,
     staleTime: 0,
   });
   const reload = () => void queryClient.invalidateQueries({ queryKey: recordKey(clientId) });
+  const record = data && data.client.id === clientId ? data : null;
+  const form = isNew ? canCreate : editing && record?.viewer.canEdit;
 
   return (
     <RecordPanel
@@ -55,17 +73,128 @@ export function ClientPanel({ ids = [], scope = "Clients" }: { ids?: string[]; s
       scope={scope}
       noun="client"
       storageKey="client-panel-width"
-      title={data?.client.name}
-      fullPageHref={clientId ? `/clients/${clientId}` : undefined}
-      isLoading={isLoading}
-      error={isError ? { title: "Couldn't load this client", description: "It may have been removed, or you can't see it." } : null}
+      title={isNew ? "New client" : data?.client.name}
+      fullPageHref={clientId && !isNew ? `/clients/${clientId}` : undefined}
+      isLoading={!form && !isNew && isLoading}
+      error={!form && !isNew && isError ? { title: "Couldn't load this client", description: "It may have been removed, or you can't see it." } : null}
     >
-      {data && <ClientRecordView key={data.client.id} record={data} onChanged={reload} />}
+      {form ? (
+        <ClientForm
+          key={record?.client.id ?? NEW_RECORD}
+          client={isNew ? undefined : record!.client}
+          onSaved={(id) => {
+            open(id);
+            void queryClient.invalidateQueries({ queryKey: recordKey(id) });
+          }}
+          onCancel={() => open(isNew ? null : clientId)}
+        />
+      ) : (
+        record && <ClientRecordView key={record.client.id} record={record} onEdit={() => open(record.client.id, { edit: true })} onChanged={reload} />
+      )}
     </RecordPanel>
   );
 }
 
-function ClientRecordView({ record, onChanged }: { record: ClientRecord; onChanged: () => void }) {
+/** Edit, archive / restore and (with no history) delete, beside the client's name. */
+function ClientActions({ record, onEdit, onChanged }: { record: ClientRecord; onEdit: () => void; onChanged: () => void }) {
+  const { client } = record;
+  const router = useRouter();
+  const pathname = usePathname();
+  const open = useOpenClient();
+  const [deleting, setDeleting] = useState(false);
+  return (
+    <>
+      <Button type="button" variant="tertiary" size="sm" onClick={onEdit}>
+        Edit client
+      </Button>
+      <RowActions
+        label={`Actions for ${client.name}`}
+        variant="tertiary"
+        actions={[
+          {
+            label: client.isArchived ? "Restore" : "Archive",
+            icon: client.isArchived ? "restore" : "archive",
+            onSelect: async () => {
+              const res = await setClientArchived(client.id, !client.isArchived);
+              if (!res.ok) return void toast.error(res.error);
+              toast.success(client.isArchived ? "Client restored" : "Client archived");
+              onChanged();
+              router.refresh();
+            },
+          },
+          { label: "Delete", icon: "delete", destructive: true, hidden: client.hasHistory, onSelect: () => setDeleting(true) },
+        ]}
+      />
+      <ConfirmDialog
+        open={deleting}
+        onOpenChange={setDeleting}
+        title={`Delete ${client.name}?`}
+        description="The client has no projects or invoices, so it can be removed for good."
+        confirmLabel="Delete client"
+        destructive
+        onConfirm={async () => {
+          const res = await deleteClient(client.id);
+          if (!res.ok) {
+            toast.error(res.error);
+            return false;
+          }
+          toast.success("Client deleted");
+          // On the client's own page there's nothing left to show.
+          if (pathname === `/clients/${client.id}`) router.push("/clients");
+          else {
+            open(null);
+            router.refresh();
+          }
+        }}
+      />
+    </>
+  );
+}
+
+/** A project for this client, from its panel; the panel stays open and shows it under Projects. */
+function NewProjectButton({ record, onCreated }: { record: ClientRecord; onCreated: () => void }) {
+  const { client } = record;
+  const choices = record.newProject!;
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button type="button" variant="tertiary" size="sm" onClick={() => setOpen(true)}>
+        New project
+      </Button>
+      {open && (
+        <ProjectFormDialog
+          open
+          onOpenChange={setOpen}
+          clients={[{ id: client.id, code: client.code, name: client.name, defaultCurrency: client.defaultCurrency }]}
+          pms={choices.pms}
+          canEditContract={choices.canEditContract}
+          onCreated={() => {
+            onCreated();
+            router.refresh();
+          }}
+          defaults={{
+            name: "",
+            kind: "client",
+            clientId: client.id,
+            contractType: "fixed",
+            currency: client.defaultCurrency as (typeof CURRENCIES)[number],
+            contractValue: null,
+            retainerFeePerMonth: null,
+            pmId: choices.defaultPmId,
+            status: "active",
+            startDate: choices.today,
+            endDate: "",
+            links: { notion: "", figma: "", drive: "", slack_channel: "" },
+            budget: { budgetHours: null, retainerHoursPerMonth: null, rolloverMode: "none", rolloverCapHours: null, alertThresholds: choices.thresholds },
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function ClientRecordView({ record, onEdit, onChanged }: { record: ClientRecord; onEdit: () => void; onChanged: () => void }) {
   const { client, sales, mail, viewer } = record;
   const [tab, setTab] = useState("overview");
 
@@ -96,7 +225,7 @@ function ClientRecordView({ record, onChanged }: { record: ClientRecord; onChang
           { value: "people", label: "People", count: sales.people.length, content: <ClientPeople people={sales.people} /> },
         ]
       : []),
-    ...(viewer.salesView ? [] : [{ value: "projects", label: "Projects", count: client.projects.length, content: <ClientProjects projects={client.projects} /> }]),
+    { value: "projects", label: "Projects", count: client.projects.length, content: <ClientProjects projects={client.projects} /> },
     {
       value: "contacts",
       label: "Billing contacts",
@@ -110,11 +239,25 @@ function ClientRecordView({ record, onChanged }: { record: ClientRecord; onChang
     <RecordBody
       icon="clients"
       title={client.name}
+      badge={client.isArchived && <StatusBadge value="archived" />}
       meta={
         <>
           <span className="tabular">{client.code}</span>
           {sales?.company?.domain && <span className="truncate">{sales.company.domain}</span>}
-          {client.isArchived && <StatusBadge value="archived" />}
+        </>
+      }
+      actions={
+        <>
+          {record.newProject && (
+            <NewProjectButton
+              record={record}
+              onCreated={() => {
+                onChanged();
+                setTab("projects");
+              }}
+            />
+          )}
+          {viewer.canEdit && <ClientActions record={record} onEdit={onEdit} onChanged={onChanged} />}
         </>
       }
       tabs={tabs}
