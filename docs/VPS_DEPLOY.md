@@ -1,5 +1,9 @@
 # Deploy ke VPS — Supabase self-hosted + Odama OS
 
+> **Legacy.** Production Odama OS sekarang di **Supabase Cloud + Vercel**
+> (`docs/SUPABASE_SETUP.md` §3). Dokumen ini disimpan sebagai alternatif kalau
+> suatu saat perlu self-host; isinya tidak lagi dirawat bersama rilis.
+
 Satu VPS menjalankan semuanya (PRD "Stack & arsitektur"):
 
 | Komponen | Jalan sebagai | Port internal | Domain (contoh) |

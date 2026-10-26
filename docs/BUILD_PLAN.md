@@ -50,7 +50,7 @@ Spec: `PRD/PRD-Fase-1-MVP.md`. Everything below runs on a fresh database from
 
 ## Not verified yet (needs the real services)
 
-- Supabase Auth end-to-end on the local Supabase stack / VPS (Docker on the dev
+- Supabase Auth end-to-end on the local Supabase stack / Supabase Cloud (Docker on the dev
   machine ran out of disk; tests used plain Postgres 16, which runs the same
   migrations). See `docs/SUPABASE_SETUP.md`.
 - Resend, Slack and Xendit with real keys (code paths fall back to log /
