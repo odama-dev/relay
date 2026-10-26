@@ -4,10 +4,11 @@ import { requireAccess } from "@/lib/auth";
 import { perms } from "@/lib/roles";
 import { getInvoice, getInvoiceDocument } from "@/lib/invoices/queries";
 import { getSettings } from "@/lib/settings";
-import { INVOICE_KIND_LABELS, INVOICE_STATUS_LABELS, PLATFORM_LABELS } from "@/lib/invoices/pure";
+import { INVOICE_KIND_LABELS, PLATFORM_LABELS } from "@/lib/invoices/pure";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
+import { InvoiceStatusMenu } from "@/components/invoice/invoice-status-menu";
 import { MoneyText } from "@/components/money-text";
 import { InvoiceDocument } from "@/components/invoice/invoice-document";
 import { InvoiceActions } from "./invoice-actions";
@@ -37,7 +38,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         }
         meta={
           <div className="flex flex-wrap items-center gap-3 text-body">
-            <StatusBadge value={inv.status} label={INVOICE_STATUS_LABELS[inv.status]} />
+            <InvoiceStatusMenu id={inv.id} status={inv.status} manual={inv.manualStatus} canEdit={perms.editInvoices(user)} />
             <span className="text-muted-foreground">
               {inv.billTo.name} · issued {formatDate(inv.issueDate)}
               {inv.sentAt && ` · sent ${formatDateTime(inv.sentAt, user.timezone)}`}

@@ -18,6 +18,8 @@ import { cn } from "@/lib/utils";
 export type Column<T> = {
   id: string;
   header: ReactNode;
+  /** A control beside the header (e.g. a column menu), kept outside the sort button. */
+  headerAction?: ReactNode;
   cell: (row: T) => ReactNode;
   /** Value used for client-side sorting. Omit to disable sorting on the column. */
   sortValue?: (row: T) => string | number | null | undefined;
@@ -32,6 +34,10 @@ type Props<T> = {
   rows: T[];
   getRowId: (row: T) => string;
   getRowHref?: (row: T) => string | undefined;
+  /** Opens the row in place (e.g. a side panel) instead of navigating to `getRowHref`. */
+  onRowClick?: (row: T) => void;
+  /** The row whose panel is open, shown as selected. */
+  isRowSelected?: (row: T) => boolean;
   /** Archived / deactivated rows: the only rows whose text is muted. */
   isRowInactive?: (row: T) => boolean;
   pageSize?: number;
@@ -67,6 +73,8 @@ export function DataTable<T>({
   rows,
   getRowId,
   getRowHref,
+  onRowClick,
+  isRowSelected,
   isRowInactive,
   pageSize = 25,
   emptyTitle = "Nothing here yet",
@@ -145,23 +153,26 @@ export function DataTable<T>({
                     col.className,
                   )}
                 >
-                  {col.sortValue ? (
-                    <button
-                      onClick={() => toggleSort(col.id)}
-                      className="hover:text-foreground inline-flex items-center gap-1 transition-colors duration-80"
-                    >
-                      {col.header}
-                      {sort?.id === col.id && (
-                        <Icon
-                          name="chevronDown"
-                          size={12}
-                          className={cn(sort.dir === "asc" && "rotate-180")}
-                        />
-                      )}
-                    </button>
-                  ) : (
-                    col.header
-                  )}
+                  <span className={cn(col.headerAction && "flex items-center justify-between gap-2")}>
+                    {col.sortValue ? (
+                      <button
+                        onClick={() => toggleSort(col.id)}
+                        className="hover:text-foreground inline-flex items-center gap-1 transition-colors duration-80"
+                      >
+                        {col.header}
+                        {sort?.id === col.id && (
+                          <Icon
+                            name="chevronDown"
+                            size={12}
+                            className={cn(sort.dir === "asc" && "rotate-180")}
+                          />
+                        )}
+                      </button>
+                    ) : (
+                      col.header
+                    )}
+                    {col.headerAction}
+                  </span>
                 </TableHead>
               ))}
             </TableRow>
@@ -176,8 +187,20 @@ export function DataTable<T>({
               return (
                 <Fragment key={id}>
                   <TableRow
-                    className={cn("border-border hover:bg-hover transition-colors duration-80", href && "cursor-pointer")}
-                    onClick={href ? () => router.push(href) : undefined}
+                    data-state={isRowSelected?.(row) ? "selected" : undefined}
+                    className={cn("border-border hover:bg-hover data-[state=selected]:bg-hover transition-colors duration-80", (href || onRowClick) && "cursor-pointer")}
+                    onClick={
+                      onRowClick
+                        ? (e) => {
+                            // A cell's own controls (inline edits, checkboxes, menus) keep their clicks, and so do their popovers (portals).
+                            const t = e.target as HTMLElement;
+                            if (!e.currentTarget.contains(t) || t.closest("button, a, input, textarea, select, label, [role=checkbox]")) return;
+                            onRowClick(row);
+                          }
+                        : href
+                          ? () => router.push(href)
+                          : undefined
+                    }
                   >
                     {columns.map((col, index) => (
                       <TableCell

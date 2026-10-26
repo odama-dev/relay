@@ -8,14 +8,16 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import type { z } from "zod";
 import type { DealView, StageView } from "@/lib/sales/queries";
-import { currencyDecimals, formatDate } from "@/lib/format";
+import type { CrmCompanyOption, CrmPersonOption } from "@/lib/crm/queries";
+import { LEAD_SOURCES, LEAD_SOURCE_LABELS, LEAD_TYPES } from "@/lib/sales/pure";
+import { currencyDecimals, formatDate, sentenceEnum } from "@/lib/format";
 import { CURRENCIES, dealSchema, type DealInput } from "@/lib/validation";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { FormField, fieldA11y } from "@/components/form-field";
 import { SelectField } from "@/components/select-field";
+import { SearchSelect } from "@/components/search-select";
 import { DatePicker } from "@/components/date-picker";
 import { AmountInput } from "@/components/amount-input";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -27,6 +29,8 @@ type Output = z.output<typeof dealSchema>;
 
 export type SalesChoices = {
   stages: StageView[];
+  crmPeople: CrmPersonOption[];
+  crmCompanies: CrmCompanyOption[];
   clients: ClientChoice[];
   people: { id: string; name: string }[];
   pms: PmChoice[];
@@ -61,42 +65,42 @@ export function DealDialog({ deal, choices, initialStageId, onClose }: { deal?: 
     control,
     handleSubmit,
     setValue,
-    formState: { errors, isSubmitting, dirtyFields },
+    getValues,
+    formState: { errors, isSubmitting },
   } = useForm<DealInput, unknown, Output>({
     resolver: zodResolver(dealSchema),
     defaultValues: deal
       ? {
           title: deal.title,
-          clientId: deal.client?.id ?? "",
-          prospectName: deal.prospectName ?? "",
+          personId: deal.person?.id ?? "",
+          companyId: deal.company?.id ?? "",
+          leadDate: deal.leadDate,
+          lastContactOn: deal.lastContactOn ?? "",
           value: deal.value,
           currency: deal.currency as (typeof CURRENCIES)[number],
-          probability: deal.probability,
-          expectedClose: deal.expectedClose ?? "",
           ownerId: deal.owner?.id ?? "",
-          leadSource: deal.leadSource ?? "",
-          serviceType: deal.serviceType ?? "",
+          leadSource: deal.leadSource,
+          leadType: deal.leadType,
           stageId: deal.stageId,
+          lastStageId: deal.lastStageId ?? "",
           lostReason: deal.lostReason ?? "",
-          notes: deal.notes ?? "",
         }
       : {
           title: "",
-          clientId: "",
-          prospectName: "",
+          personId: "",
+          companyId: "",
+          leadDate: choices.today,
+          lastContactOn: "",
           value: undefined as unknown as number,
           currency: "IDR",
-          probability: startStage.probability,
-          expectedClose: "",
           ownerId: choices.userId,
-          leadSource: "",
-          serviceType: "",
+          leadSource: null,
+          leadType: null,
           stageId: startStage.id,
+          lastStageId: "",
           lostReason: "",
-          notes: "",
         },
   });
-  const clientId = useWatch({ control, name: "clientId" });
   const stageId = useWatch({ control, name: "stageId" });
   const currency = useWatch({ control, name: "currency" });
   const stage = choices.stages.find((s) => s.id === stageId);
@@ -125,31 +129,63 @@ export function DealDialog({ deal, choices, initialStageId, onClose }: { deal?: 
           {deal && stage?.category === "won" && <WonNextStep deal={deal} choices={choices} onDone={onClose} />}
 
           <fieldset disabled={readOnly} className="grid gap-4">
-            <FormField label="Deal" htmlFor="d-title" required error={errors.title?.message}>
-              <Input {...register("title")} {...fieldA11y("d-title", errors.title?.message)} placeholder="e.g. Website redesign" />
+            <FormField label="Lead name" htmlFor="d-title" required error={errors.title?.message}>
+              <Input {...register("title")} {...fieldA11y("d-title", errors.title?.message)} placeholder="e.g. Website redesign for Kopi Senja" />
             </FormField>
             <div className="grid gap-4 sm:grid-cols-2">
-              <FormField label="Client" htmlFor="d-client">
+              <FormField label="Associated company" htmlFor="d-company" hint="From Companies. A client's company links the deal to that client.">
                 <Controller
                   control={control}
-                  name="clientId"
+                  name="companyId"
                   render={({ field }) => (
-                    <SelectField
-                      id="d-client"
-                      value={field.value ?? ""}
+                    <SearchSelect
+                      id="d-company"
+                      value={field.value}
                       onChange={field.onChange}
-                      noneLabel="A prospect — not a client yet"
-                      options={choices.clients.map((c) => ({ value: c.id, label: c.name }))}
-                      disabled={Boolean(deal?.project)}
+                      noneLabel="No company"
+                      placeholder="Search companies…"
+                      emptyText="No company found. Add it in Companies first."
+                      options={choices.crmCompanies.map((c) => ({ value: c.id, label: c.name, hint: c.domain ?? undefined }))}
+                      disabled={readOnly || Boolean(deal?.project)}
                     />
                   )}
                 />
               </FormField>
-              {!clientId && (
-                <FormField label="Prospect" htmlFor="d-prospect" required error={errors.prospectName?.message}>
-                  <Input {...register("prospectName")} {...fieldA11y("d-prospect", errors.prospectName?.message)} placeholder="Company name" />
-                </FormField>
-              )}
+              <FormField label="Associated person" htmlFor="d-person" hint="From People, matched by name or email.">
+                <Controller
+                  control={control}
+                  name="personId"
+                  render={({ field }) => (
+                    <SearchSelect
+                      id="d-person"
+                      value={field.value}
+                      onChange={(v) => {
+                        field.onChange(v);
+                        // A person at a company brings the company along when none is set.
+                        const person = choices.crmPeople.find((p) => p.id === v);
+                        if (person?.companyId && !getValues("companyId") && !deal?.project) setValue("companyId", person.companyId);
+                      }}
+                      noneLabel="No person"
+                      placeholder="Search people…"
+                      emptyText="No person found. Add them in People first."
+                      options={choices.crmPeople.map((p) => ({ value: p.id, label: p.name, hint: p.email ?? undefined }))}
+                      disabled={readOnly}
+                    />
+                  )}
+                />
+              </FormField>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField label="Lead date in" htmlFor="d-lead-date" required error={errors.leadDate?.message}>
+                <Controller control={control} name="leadDate" render={({ field }) => <DatePicker id="d-lead-date" value={field.value} onChange={field.onChange} className="w-full" />} />
+              </FormField>
+              <FormField label="Last contact" htmlFor="d-last-contact">
+                <Controller
+                  control={control}
+                  name="lastContactOn"
+                  render={({ field }) => <DatePicker id="d-last-contact" value={field.value ?? ""} onChange={field.onChange} clearable className="w-full" />}
+                />
+              </FormField>
             </div>
             <div className="grid gap-4 sm:grid-cols-[1fr_120px]">
               <FormField label="Value" htmlFor="d-value" required error={errors.value?.message}>
@@ -169,45 +205,6 @@ export function DealDialog({ deal, choices, initialStageId, onClose }: { deal?: 
                 />
               </FormField>
             </div>
-            <div className="grid gap-4 sm:grid-cols-[1fr_120px_1fr]">
-              <FormField label="Stage" htmlFor="d-stage">
-                <Controller
-                  control={control}
-                  name="stageId"
-                  render={({ field }) => (
-                    <SelectField
-                      id="d-stage"
-                      value={field.value}
-                      onChange={(v) => {
-                        field.onChange(v);
-                        // The stage's default probability, unless it was set by hand.
-                        const next = choices.stages.find((s) => s.id === v);
-                        if (next && !dirtyFields.probability) setValue("probability", next.probability);
-                      }}
-                      options={choices.stages.map((s) => ({ value: s.id, label: s.name }))}
-                    />
-                  )}
-                />
-              </FormField>
-              <FormField label="Probability %" htmlFor="d-prob" error={errors.probability?.message}>
-                <Input
-                  type="number"
-                  min={0}
-                  max={100}
-                  disabled={stage?.category !== "open"}
-                  {...register("probability", { valueAsNumber: true })}
-                  {...fieldA11y("d-prob", errors.probability?.message)}
-                />
-              </FormField>
-              <FormField label="Expected close" htmlFor="d-close">
-                <Controller control={control} name="expectedClose" render={({ field }) => <DatePicker id="d-close" value={field.value ?? ""} onChange={field.onChange} className="w-full" />} />
-              </FormField>
-            </div>
-            {stage?.category === "lost" && (
-              <FormField label="Why it was lost" htmlFor="d-lost" required>
-                <Input id="d-lost" {...register("lostReason")} placeholder="e.g. Budget moved to next year" />
-              </FormField>
-            )}
             <div className="grid gap-4 sm:grid-cols-3">
               <FormField label="Owner" htmlFor="d-owner">
                 <Controller
@@ -219,15 +216,74 @@ export function DealDialog({ deal, choices, initialStageId, onClose }: { deal?: 
                 />
               </FormField>
               <FormField label="Lead source" htmlFor="d-source">
-                <Input id="d-source" {...register("leadSource")} placeholder="Referral, Dribbble…" />
+                <Controller
+                  control={control}
+                  name="leadSource"
+                  render={({ field }) => (
+                    <SelectField
+                      id="d-source"
+                      value={field.value ?? ""}
+                      onChange={(v) => field.onChange(v || null)}
+                      noneLabel="Not set"
+                      options={LEAD_SOURCES.map((v) => ({ value: v, label: LEAD_SOURCE_LABELS[v] }))}
+                    />
+                  )}
+                />
               </FormField>
-              <FormField label="Service" htmlFor="d-service">
-                <Input id="d-service" {...register("serviceType")} placeholder="Website, Branding…" />
+              <FormField label="Lead type" htmlFor="d-type">
+                <Controller
+                  control={control}
+                  name="leadType"
+                  render={({ field }) => (
+                    <SelectField
+                      id="d-type"
+                      value={field.value ?? ""}
+                      onChange={(v) => field.onChange(v || null)}
+                      noneLabel="Not set"
+                      options={LEAD_TYPES.map((v) => ({ value: v, label: sentenceEnum(v) }))}
+                    />
+                  )}
+                />
               </FormField>
             </div>
-            <FormField label="Notes" htmlFor="d-notes">
-              <Textarea id="d-notes" rows={3} {...register("notes")} />
-            </FormField>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField label="Stage" htmlFor="d-stage">
+                <Controller
+                  control={control}
+                  name="stageId"
+                  render={({ field }) => (
+                    <SelectField
+                      id="d-stage"
+                      value={field.value}
+                      onChange={field.onChange}
+                      options={choices.stages.filter((s) => !s.isHidden || s.id === field.value).map((s) => ({ value: s.id, label: s.name }))}
+                    />
+                  )}
+                />
+              </FormField>
+              {stage && stage.category !== "open" && (
+                <FormField label="Last stage" htmlFor="d-last-stage" hint="The furthest open stage it reached.">
+                  <Controller
+                    control={control}
+                    name="lastStageId"
+                    render={({ field }) => (
+                      <SelectField
+                        id="d-last-stage"
+                        value={field.value ?? ""}
+                        onChange={field.onChange}
+                        noneLabel="Not recorded"
+                        options={choices.stages.filter((s) => s.category === "open" && (!s.isHidden || s.id === field.value)).map((s) => ({ value: s.id, label: s.name }))}
+                      />
+                    )}
+                  />
+                </FormField>
+              )}
+            </div>
+            {stage?.category === "lost" && (
+              <FormField label="Lost reason" htmlFor="d-lost">
+                <Input id="d-lost" {...register("lostReason")} placeholder="e.g. Budget moved to next year" />
+              </FormField>
+            )}
           </fieldset>
 
           <DialogFooter className="sm:justify-between">

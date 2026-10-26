@@ -20,7 +20,7 @@ import { deleteContact, makePrimaryContact, saveContact } from "../actions";
 
 type Contact = ClientDetail["contacts"][number];
 
-export function ContactsPanel({ clientId, contacts, canEdit }: { clientId: string; contacts: Contact[]; canEdit: boolean }) {
+export function ContactsPanel({ clientId, contacts, canEdit, onChanged }: { clientId: string; contacts: Contact[]; canEdit: boolean; onChanged?: () => void }) {
   const router = useRouter();
   const [editing, setEditing] = useState<Contact | "new" | null>(null);
 
@@ -28,6 +28,7 @@ export function ContactsPanel({ clientId, contacts, canEdit }: { clientId: strin
     if (!res.ok) return void toast.error(res.error);
     if (msg) toast.success(msg);
     router.refresh();
+    onChanged?.();
   };
 
   return (
@@ -87,6 +88,7 @@ export function ContactsPanel({ clientId, contacts, canEdit }: { clientId: strin
               onDone={() => {
                 setEditing(null);
                 router.refresh();
+                onChanged?.();
               }}
             />
           )}

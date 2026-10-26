@@ -10,6 +10,7 @@
     { "path": "/api/cron/budget-alerts", "schedule": "15 1 * * *" },
     { "path": "/api/cron/review-sla", "schedule": "0 3 * * 1-5" },
     { "path": "/api/cron/kpi-snapshot", "schedule": "0 1 1 * *" },
-    { "path": "/api/cron/pipeline-snapshot", "schedule": "55 16 * * *" }
+    { "path": "/api/cron/pipeline-snapshot", "schedule": "55 16 * * *" },
+    { "path": "/api/cron/mail-sync", "schedule": "0 23 * * *" }
   ]
 }

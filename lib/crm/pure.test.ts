@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeValue, valueSort, valueText, type CrmOption } from "./pure";
+import { connectionStrength, normalizeValue, valueSort, valueText, type CrmOption } from "./pure";
 
 const opts: CrmOption[] = [
   { id: "a", label: "Hot", color: "red" },
@@ -32,5 +32,19 @@ describe("CRM values", () => {
     expect(valueSort("currency", [], 5)).toBe(5);
     expect(valueSort("select", opts, "a")).toBe("hot");
     expect(valueSort("text", [], null)).toBeNull();
+  });
+});
+
+describe("connectionStrength", () => {
+  const now = new Date("2026-10-26T00:00:00Z");
+  const ago = (days: number, direction: "inbound" | "outbound") => ({ sentAt: new Date(now.getTime() - days * 86_400_000).toISOString(), direction });
+  it("rates by recent, two-way email", () => {
+    expect(connectionStrength([], now)).toBe("none");
+    expect(connectionStrength([ago(200, "outbound")], now)).toBe("weak");
+    expect(connectionStrength([ago(400, "outbound")], now)).toBe("none");
+    expect(connectionStrength([ago(60, "outbound"), ago(50, "inbound")], now)).toBe("strong");
+    expect(connectionStrength([ago(5, "outbound"), ago(4, "inbound"), ago(20, "outbound"), ago(40, "inbound"), ago(60, "outbound"), ago(80, "outbound")], now)).toBe("very_strong");
+    // Six one-way emails are only strong.
+    expect(connectionStrength([1, 2, 3, 4, 5, 6].map((d) => ago(d, "outbound")), now)).toBe("strong");
   });
 });

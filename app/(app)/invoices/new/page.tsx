@@ -6,6 +6,7 @@ import { todayIn, addDays } from "@/lib/time/pure";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/states";
 import { InvoiceEditor } from "@/components/invoice/invoice-editor";
+import type { CURRENCIES } from "@/lib/validation";
 
 export const metadata = { title: "New invoice" };
 
@@ -25,7 +26,7 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: P
     );
     return (
       <div className="mx-auto flex w-full max-w-2xl flex-col">
-        <PageHeader title="New invoice" description="Choose the project to invoice. Client, currency and billing details come from it." />
+        <PageHeader title="New invoice" description="Choose the project to invoice. Currency and billing details start from it — you can change them on the next step." />
         {projects.length === 0 ? (
           <EmptyState icon="projects" title="No client projects to invoice" description="Invoices are created for Active or On hold client projects." />
         ) : (
@@ -47,7 +48,7 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: P
   }
 
   const project = await asUser(user, (tx) =>
-    tx.project.findUnique({ where: { id: projectId }, select: { id: true, code: true, name: true, kind: true, status: true, currency: true, client: { select: { name: true, billingEmail: true } } } }),
+    tx.project.findUnique({ where: { id: projectId }, select: { id: true, code: true, name: true, kind: true, status: true, currency: true, client: { select: { name: true, billingEmail: true, billingAddress: true } } } }),
   ).catch(() => null);
   if (!project || project.kind !== "client") notFound();
 
@@ -60,17 +61,16 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: P
       />
       <InvoiceEditor
         projectId={project.id}
-        currency={project.currency}
         initial={{
           issueDate: today,
+          currency: project.currency as (typeof CURRENCIES)[number],
+          billTo: { name: project.client?.name ?? "", address: project.client?.billingAddress ?? "", email: project.client?.billingEmail ?? "" },
           notes: "",
           kind: null,
           platform: "xendit",
           items: [{ description: "", quantity: 1, unitPrice: null }],
-          requests: [
-            { label: "Down Payment", percent: 50, amount: null, dueDate: addDays(today, 7) },
-            { label: "Final Payment", percent: 50, amount: null, dueDate: addDays(today, 30) },
-          ],
+          // One request to start; Sales splits it into as many as the deal needs.
+          requests: [{ label: "Payment", percent: 100, amount: null, dueDate: addDays(today, 14) }],
         }}
       />
     </div>

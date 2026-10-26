@@ -11,7 +11,7 @@ const contractLabel = (c: ProjectListRow["contractType"]) =>
 
 const HEALTH_ORDER = { over_budget: 0, warning: 1, on_track: 2, no_budget: 3 } as const;
 
-export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
+export function ProjectsTable({ rows, showHealth = true }: { rows: ProjectListRow[]; showHealth?: boolean }) {
   const columns: Column<ProjectListRow>[] = [
     {
       id: "project",
@@ -29,12 +29,12 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
     { id: "client", header: "Client", primary: true, sortValue: (r) => r.client?.name ?? "", cell: (r) => r.client?.name ?? "Internal" },
     { id: "pm", header: "PM", sortValue: (r) => r.pm.name, cell: (r) => r.pm.name },
     { id: "contract", header: "Contract", sortValue: (r) => r.contractType ?? "", cell: (r) => contractLabel(r.contractType) },
-    {
+    ...(showHealth ? [{
       id: "health",
       header: "Health",
-      sortValue: (r) => (r.health ? HEALTH_ORDER[r.health.status] * 1000 - (r.health.pct ?? 0) : 9999),
-      cell: (r) => (r.health ? <HealthIndicator health={r.health} /> : "—"),
-    },
+      sortValue: (r: ProjectListRow) => (r.health ? HEALTH_ORDER[r.health.status] * 1000 - (r.health.pct ?? 0) : 9999),
+      cell: (r: ProjectListRow) => (r.health ? <HealthIndicator health={r.health} /> : "—"),
+    } satisfies Column<ProjectListRow>] : []),
   ];
   return (
     <DataTable

@@ -8,7 +8,8 @@ import { run, fail, parseOrFail, type ActionResult } from "@/lib/actions";
 import { logActivity } from "@/lib/audit";
 import { perms } from "@/lib/roles";
 import { normalizeValue, optionsSchema, type CrmValue } from "@/lib/crm/pure";
-import { CRM_OBJECTS, crmColumnEditSchema, crmColumnSchema, crmCompanySchema, crmFieldSchema, crmPersonSchema, uuid } from "@/lib/validation";
+import { getPersonRecord, type PersonRecord } from "@/lib/crm/person-record";
+import { CRM_OBJECTS, crmColumnEditSchema, crmColumnSchema, crmCompanySchema, crmFieldSchema, crmNoteEditSchema, crmNoteSchema, crmPersonSchema, uuid } from "@/lib/validation";
 
 /**
  * Sales CRM — Companies and People. Writes run under RLS (Sales module);
@@ -184,4 +185,70 @@ export async function archiveRecords(object: unknown, ids: unknown): Promise<Act
     revalidateCrm();
     return { count: res.count };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Notes — on a client, company, person or deal. Authors edit and delete
+// their own (RLS: crm_notes_*).
+// ---------------------------------------------------------------------------
+
+function revalidateNotes(n: { clientId?: string | null }) {
+  if (n.clientId) revalidatePath(`/clients/${n.clientId}`);
+  revalidatePath("/sales");
+}
+
+export async function addNote(raw: unknown): Promise<ActionResult<{ id: string }>> {
+  return run(async () => {
+    const user = await salesUser();
+    const d = parseOrFail(crmNoteSchema, raw);
+    const note = await asUser(user, (tx) =>
+      tx.crmNote.create({
+        data: { body: d.body, clientId: d.clientId ?? null, companyId: d.companyId ?? null, personId: d.personId ?? null, dealId: d.dealId ?? null },
+      }),
+    );
+    await logActivity({ actorId: user.id, entityType: "crm_note", entityId: note.id, action: "created", metadata: { clientId: d.clientId, companyId: d.companyId, personId: d.personId, dealId: d.dealId } });
+    revalidateNotes(note);
+    return { id: note.id };
+  });
+}
+
+export async function editNote(id: unknown, raw: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const user = await salesUser();
+    const noteId = parseOrFail(uuid, id);
+    const d = parseOrFail(crmNoteEditSchema, raw);
+    const note = await asUser(user, async (tx) => {
+      const res = await tx.crmNote.updateMany({ where: { id: noteId }, data: { body: d.body } });
+      if (res.count === 0) fail("You can only edit your own notes.");
+      return tx.crmNote.findUniqueOrThrow({ where: { id: noteId }, select: { clientId: true } });
+    });
+    await logActivity({ actorId: user.id, entityType: "crm_note", entityId: noteId, action: "updated" });
+    revalidateNotes(note);
+  });
+}
+
+export async function deleteNote(id: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const user = await salesUser();
+    const noteId = parseOrFail(uuid, id);
+    const note = await asUser(user, async (tx) => {
+      const n = await tx.crmNote.findUnique({ where: { id: noteId }, select: { clientId: true, body: true } });
+      if (!n) fail("Note not found.");
+      const res = await tx.crmNote.deleteMany({ where: { id: noteId } });
+      if (res.count === 0) fail("You can only delete your own notes.");
+      return n;
+    });
+    await logActivity({ actorId: user.id, entityType: "crm_note", entityId: noteId, action: "deleted", metadata: { body: note.body.slice(0, 200) } });
+    revalidateNotes(note);
+  });
+}
+
+/** The person side panel's data (`?person=<id>` on People), read under RLS. */
+export async function loadPersonRecord(personId: unknown): Promise<PersonRecord> {
+  const user = await requireUser();
+  const id = uuid.safeParse(personId);
+  if (!id.success || !perms.viewPipeline(user)) throw new Error("Person not found");
+  const record = await getPersonRecord(user, id.data);
+  if (!record) throw new Error("Person not found");
+  return record;
 }

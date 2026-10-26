@@ -91,7 +91,7 @@ export default async function ProjectPage({
     label: "Overview",
     content: <OverviewPanel project={project} people={people.map((p) => ({ id: p.id, name: p.name, avatarUrl: avatarOf.get(p.id) ?? null }))} />,
   });
-  if (project.health && project.budget) {
+  if (project.health && project.budget && perms.showHealth(user)) {
     tabs.push({
       value: "health",
       label: "Health",
@@ -128,7 +128,7 @@ export default async function ProjectPage({
             action={v.canCreateInvoice ? <PillButton href={`/invoices/new?project=${id}`}>Create invoice</PillButton> : null}
           />
         ) : (
-          <InvoicesTable rows={invoices} hideProject />
+          <InvoicesTable rows={invoices} hideProject canEditStatus={perms.editInvoices(user)} />
         ),
     });
   }
@@ -153,7 +153,7 @@ export default async function ProjectPage({
               {project.client?.name ?? "Internal"} · PM {project.pm.name}
               {project.contractType && ` · ${project.contractType === "time_and_material" ? "Time & material" : sentenceEnum(project.contractType)}`}
             </span>
-            {project.health && <HealthIndicator health={project.health.current} />}
+            {project.health && perms.showHealth(user) && <HealthIndicator health={project.health.current} />}
           </div>
         }
         actions={

@@ -3,9 +3,13 @@
 import type { CrmColumn, PersonRow, Ref } from "@/lib/crm/queries";
 import { RecordsTable, type BuiltinColumn } from "@/components/crm/records-table";
 import { NewRecordButton } from "../new-record";
+import { ClientPanel } from "@/components/clients/client-panel";
+import { PersonPanel, useOpenPerson, useOpenPersonId } from "./person-panel";
 
 /** People: contacts, with or without a company, and Sales' own columns. */
 export function PeopleView({ rows, columns, companies, owners, canEdit }: { rows: PersonRow[]; columns: CrmColumn[]; companies: Ref[]; owners: Ref[]; canEdit: boolean }) {
+  const openPerson = useOpenPerson();
+  const openId = useOpenPersonId();
   const builtins: BuiltinColumn<PersonRow>[] = [
     { key: "email", header: "Email", icon: "mail", kind: "email", get: (r) => r.email },
     { key: "phone", header: "Phone", icon: "phone", kind: "phone", get: (r) => r.phone },
@@ -14,6 +18,20 @@ export function PeopleView({ rows, columns, companies, owners, canEdit }: { rows
     { key: "ownerId", header: "Owner", icon: "user", kind: "ref", refs: owners, get: (r) => r.owner?.id ?? null },
   ];
   return (
-    <RecordsTable object="person" noun="person" rows={rows} builtins={builtins} columns={columns} canEdit={canEdit} actions={canEdit && <NewRecordButton object="person" companies={companies} />} />
+    <>
+      <RecordsTable
+        object="person"
+        noun="person"
+        rows={rows}
+        builtins={builtins}
+        columns={columns}
+        canEdit={canEdit}
+        actions={canEdit && <NewRecordButton object="person" companies={companies} />}
+        onOpen={(r) => openPerson(r.id)}
+        openId={openId}
+      />
+      <PersonPanel rows={rows} companies={companies} owners={owners} canEdit={canEdit} />
+      <ClientPanel scope="People" />
+    </>
   );
 }

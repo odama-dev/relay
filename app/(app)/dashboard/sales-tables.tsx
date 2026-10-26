@@ -1,11 +1,10 @@
 "use client";
 
-import type { HealthStatus } from "@/lib/health/pure";
-import type { Money } from "@/lib/dashboard/pure";
 import type { MyInvoice } from "@/lib/dashboard/queries";
-import { formatDateShort, formatMoney } from "@/lib/format";
+import { formatDateShort } from "@/lib/format";
 import { DataTable, type Column } from "@/components/data-table";
-import { StatusBadge } from "@/components/status-badge";
+import { ClientPanel, useOpenClient, useOpenClientId } from "@/components/clients/client-panel";
+import { InvoiceStatusMenu } from "@/components/invoice/invoice-status-menu";
 import { MoneyText } from "@/components/money-text";
 import { Icon, type IconName } from "@/components/icon";
 
@@ -41,7 +40,7 @@ export function MyInvoicesTable({ rows }: { rows: MyInvoice[] }) {
         </span>
       ),
     },
-    { id: "status", header: "Status", cell: (r) => <StatusBadge value={r.status} />, sortValue: (r) => r.status },
+    { id: "status", header: "Status", cell: (r) => <InvoiceStatusMenu id={r.id} status={r.status} manual={r.manualStatus} canEdit />, sortValue: (r) => r.status },
     {
       id: "remaining",
       header: "Remaining",
@@ -63,27 +62,15 @@ export function MyInvoicesTable({ rows }: { rows: MyInvoice[] }) {
   );
 }
 
-type ClientRow = { id: string; name: string; projects: number; health: HealthStatus; outstanding: Money[]; late: boolean };
+type ClientRow = { id: string; name: string; projects: number; late: boolean };
 
-/** SL-3 — how your clients are doing: projects, worst health, outstanding, anything late. */
+/** SL-3 — your clients with active work, and whether any payment is late. */
 export function ActiveClientsTable({ rows }: { rows: ClientRow[] }) {
+  const openClient = useOpenClient();
+  const openId = useOpenClientId();
   const columns: Column<ClientRow>[] = [
     { id: "name", header: "Client", primary: true, cell: (r) => r.name, sortValue: (r) => r.name },
     { id: "projects", header: "Active projects", align: "right", cell: (r) => <span className="tabular">{r.projects}</span>, sortValue: (r) => r.projects },
-    { id: "health", header: "Health", cell: (r) => <StatusBadge value={r.health} />, sortValue: (r) => r.health },
-    {
-      id: "outstanding",
-      header: "Outstanding",
-      align: "right",
-      // One line per cell: currencies side by side, never stacked.
-      cell: (r) =>
-        r.outstanding.length ? (
-          <span className="tabular">{r.outstanding.map((m) => formatMoney(m.amount, m.currency)).join(" · ")}</span>
-        ) : (
-          <span className="text-muted-foreground">Nothing owed</span>
-        ),
-      sortValue: (r) => r.outstanding.length,
-    },
     {
       id: "payment",
       header: "Payment",
@@ -91,5 +78,18 @@ export function ActiveClientsTable({ rows }: { rows: ClientRow[] }) {
       sortValue: (r) => Number(r.late),
     },
   ];
-  return <DataTable columns={columns} rows={rows} getRowId={(r) => r.id} getRowHref={(r) => `/clients/${r.id}`} pageSize={10} emptyTitle="No clients with active projects" />;
+  return (
+    <>
+      <DataTable
+        columns={columns}
+        rows={rows}
+        getRowId={(r) => r.id}
+        onRowClick={(r) => openClient(r.id)}
+        isRowSelected={(r) => r.id === openId}
+        pageSize={10}
+        emptyTitle="No clients with active projects"
+      />
+      <ClientPanel ids={rows.map((r) => r.id)} scope="Active clients" />
+    </>
+  );
 }

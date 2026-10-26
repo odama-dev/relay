@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { avgDealDays, isStale, monthlyCandles, newLeads, openValueAt, pipelineBridge, pipelineTotals, winRate, type DealFacts, type StageMove } from "./pure";
+import { avgDealDays, funnel, isStale, leadSourceComparison, monthlyCandles, newLeads, normalizeLeadSource, resolveStageName, wonByMonth, openValueAt, pipelineBridge, pipelineTotals, winRate, type DealFacts, type StageMove } from "./pure";
 
 const deal = (over: Partial<DealFacts>): DealFacts => ({
   category: "open",
@@ -77,5 +77,86 @@ describe("monthly report", () => {
     const b = pipelineBridge(moves, "2026-10-01", 45);
     expect(b.end).toBe(45);
     expect(b.adjusted).toBe(35);
+  });
+});
+
+describe("normalizeLeadSource", () => {
+  it("maps free text onto the list", () => {
+    expect(normalizeLeadSource("Dribbble")).toBe("dribbble");
+    expect(normalizeLeadSource(" Company website ")).toBe("website");
+    expect(normalizeLeadSource("Cold email")).toBe("email");
+    expect(normalizeLeadSource("Referral")).toBe("referral");
+    expect(normalizeLeadSource("Networking event")).toBe("referral");
+    expect(normalizeLeadSource("Existing client")).toBe("referral");
+    expect(normalizeLeadSource("Upwork")).toBe("other");
+    expect(normalizeLeadSource("contra")).toBe("contra");
+  });
+  it("keeps empty values empty", () => {
+    expect(normalizeLeadSource("")).toBeNull();
+    expect(normalizeLeadSource(null)).toBeNull();
+  });
+});
+
+describe("sales report", () => {
+  const steps = [
+    { label: "Qualified", position: 1 },
+    { label: "Discovery call", position: 2 },
+    { label: "Closed won", position: "won" as const },
+  ];
+  it("counts a deal at every step it passed, even a skipped one", () => {
+    const f = funnel(
+      [
+        { furthestOpen: 0, won: false, valueIdr: 10 },
+        { furthestOpen: 1, won: false, valueIdr: 20 },
+        { furthestOpen: 3, won: false, valueIdr: 30 },
+        { furthestOpen: 0, won: true, valueIdr: 40 },
+      ],
+      steps,
+    );
+    expect(f.map((s) => s.deals)).toEqual([3, 2, 1]);
+    expect(f.map((s) => s.valueIdr)).toEqual([90, 70, 40]);
+  });
+  it("compares lead sources by win rate of closed deals", () => {
+    const rows = leadSourceComparison([
+      { source: "referral", category: "won", valueIdr: 100 },
+      { source: "referral", category: "lost", valueIdr: 50 },
+      { source: "referral", category: "open", valueIdr: 10 },
+      { source: null, category: "open", valueIdr: 5 },
+    ]);
+    expect(rows).toEqual([
+      { source: "referral", label: "Referral / networking", leads: 3, won: 1, lost: 1, winRate: 50, wonIdr: 100 },
+      { source: "unknown", label: "Not set", leads: 1, won: 0, lost: 0, winRate: null, wonIdr: 0 },
+    ]);
+  });
+  it("sums won value by the month it closed", () => {
+    const rows = wonByMonth(
+      [
+        { category: "won", closedOn: "2026-09-03", valueIdr: 100 },
+        { category: "won", closedOn: "2026-09-28", valueIdr: 50 },
+        { category: "lost", closedOn: "2026-09-10", valueIdr: 999 },
+        { category: "won", closedOn: "2026-10-01", valueIdr: 25 },
+      ],
+      ["2026-09-01", "2026-10-01"],
+    );
+    expect(rows).toEqual([
+      { month: "2026-09-01", deals: 2, valueIdr: 150 },
+      { month: "2026-10-01", deals: 1, valueIdr: 25 },
+    ]);
+  });
+});
+
+describe("resolveStageName", () => {
+  const stages = new Map([
+    ["researched", "r"],
+    ["contacted", "c"],
+    ["call booked", "cb"],
+    ["proposal", "p"],
+  ]);
+  it("takes current names, and maps the old pipeline's", () => {
+    expect(resolveStageName("Proposal", stages)).toBe("p");
+    expect(resolveStageName(" Proposal sent ", stages)).toBe("p");
+    expect(resolveStageName("Lead", stages)).toBe("r");
+    expect(resolveStageName("Discovery call", stages)).toBe("cb");
+    expect(resolveStageName("Pitching", stages)).toBeUndefined();
   });
 });

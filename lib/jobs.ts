@@ -10,6 +10,7 @@ import { addDays, addMonths, isoWeekday, monthStart, parseIsoDate, todayIn, week
 import { kpiContext, snapshotKpi } from "@/lib/kpi/engine";
 import { formatDuration } from "@/lib/format";
 import { snapshotPipeline } from "@/lib/sales/queries";
+import { syncAllMailboxes } from "@/lib/mail/client";
 
 /**
  * Scheduled jobs (PRD "Job terjadwal", WIB). The VPS cron calls
@@ -175,6 +176,11 @@ async function pipelineSnapshot() {
   return snapshotPipeline(todayIn(STUDIO_TZ));
 }
 
+/** Every 10 minutes on the VPS, daily on Vercel (plan limit) — new mail from connected mailboxes. */
+async function mailSync() {
+  return syncAllMailboxes();
+}
+
 export const JOBS = {
   "due-reminders": dueReminders,
   "time-reminders": timeReminders,
@@ -186,6 +192,7 @@ export const JOBS = {
   "review-sla": reviewSla,
   "kpi-snapshot": kpiSnapshot,
   "pipeline-snapshot": pipelineSnapshot,
+  "mail-sync": mailSync,
 } as const;
 
 export type JobName = keyof typeof JOBS;

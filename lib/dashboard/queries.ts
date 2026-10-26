@@ -418,6 +418,7 @@ export type MyInvoice = {
   number: string | null;
   client: string;
   status: InvoiceStatus;
+  manualStatus: boolean;
   currency: string;
   remaining: number;
   requests: { label: string; status: PaymentRequestStatus | "late"; dueDate: IsoDate }[];
@@ -443,6 +444,7 @@ export async function loadMyInvoices(ctx: DashboardContext): Promise<MyInvoice[]
       number: i.number,
       client: i.client.name,
       status: i.status,
+      manualStatus: i.statusOverride !== null,
       currency: i.currency,
       remaining: Math.max(0, numOr0(i.total) - numOr0(i.amountPaid)),
       requests: i.paymentRequests.map((r) => {
@@ -453,24 +455,23 @@ export async function loadMyInvoices(ctx: DashboardContext): Promise<MyInvoice[]
     .sort((a, b) => order[a.status] - order[b.status]);
 }
 
-/** SL-3 — clients with active / on-hold projects: project count, worst health, outstanding, late or not. */
+/** SL-3 — clients with active / on-hold projects: project count and whether any payment is late. */
 export async function loadActiveClients(ctx: DashboardContext) {
-  const [projects, requests] = await Promise.all([healthRows(ctx, { kind: "client", status: { in: ACTIVE } }), openRequests(ctx)]);
-  const worst: HealthStatus[] = ["over_budget", "warning", "on_track", "no_budget"];
-  const byClient = new Map<string, { id: string; name: string; projects: number; health: HealthStatus }>();
+  const [projects, requests] = await Promise.all([
+    asUser(ctx.user, (tx) =>
+      tx.project.findMany({ where: { kind: "client", status: { in: ACTIVE }, clientId: { not: null } }, select: { clientId: true, client: { select: { name: true } } } }),
+    ),
+    openRequests(ctx),
+  ]);
+  const byClient = new Map<string, { id: string; name: string; projects: number }>();
   for (const p of projects) {
-    if (!p.clientId) continue;
-    const c = byClient.get(p.clientId) ?? { id: p.clientId, name: p.client, projects: 0, health: "no_budget" as HealthStatus };
+    const c = byClient.get(p.clientId!) ?? { id: p.clientId!, name: p.client?.name ?? "—", projects: 0 };
     c.projects += 1;
-    if (worst.indexOf(p.status) < worst.indexOf(c.health)) c.health = p.status;
-    byClient.set(p.clientId, c);
+    byClient.set(p.clientId!, c);
   }
   return [...byClient.values()]
-    .map((c) => {
-      const mine = requests.filter((r) => r.client.id === c.id);
-      return { ...c, outstanding: sumByCurrency(mine), late: mine.some((r) => r.state === "late") };
-    })
-    .sort((a, b) => Number(b.late) - Number(a.late) || worst.indexOf(a.health) - worst.indexOf(b.health) || a.name.localeCompare(b.name));
+    .map((c) => ({ ...c, late: requests.some((r) => r.client.id === c.id && r.state === "late") }))
+    .sort((a, b) => Number(b.late) - Number(a.late) || a.name.localeCompare(b.name));
 }
 
 /** SL-4 — active client projects with no invoice at all. */
@@ -487,7 +488,7 @@ export async function loadUninvoicedProjects(ctx: DashboardContext) {
 
 /**
  * SL-0 — the sales strip and trend: invoiced vs collected per month (last six,
- * in IDR at indicative rates), what clients still owe, and what isn't billed.
+ * in IDR at indicative rates) and what isn't billed.
  * Collected uses the settled IDR when Xendit reported it.
  */
 export async function loadSalesSummary(ctx: DashboardContext) {
@@ -505,8 +506,7 @@ export async function loadSalesSummary(ctx: DashboardContext) {
     uninvoiced: await tx.project.count({ where: { kind: "client", status: "active", invoices: { none: {} } } }),
     drafts: await tx.invoice.count({ where: { status: "draft", createdBy: ctx.user.id } }),
   }));
-  const open = await openRequests(ctx);
-  const rates = await getIdrRates([...invoices, ...payments, ...open].map((r) => r.currency));
+  const rates = await getIdrRates([...invoices, ...payments].map((r) => r.currency));
   const toIdr = (items: Money[]) => (rates ? normalizeToIdr(items, rates.toIdr) : items.every((m) => m.currency === "IDR") ? normalizeToIdr(items, {}) : null);
 
   const trend = months.map((month) => {
@@ -516,17 +516,10 @@ export async function loadSalesSummary(ctx: DashboardContext) {
     const unsettled = toIdr(paid.filter((p) => p.settlementAmountIdr == null).map((p) => ({ currency: p.currency, amount: numOr0(p.amount) })));
     return { month, invoiced: toIdr(billed), collected: unsettled === null ? null : Math.round(settled) + unsettled };
   });
-  const outstanding = sumByCurrency(open);
   return {
     trend,
     current: trend[5]!,
     previous: trend[4]!,
-    outstanding: {
-      idr: toIdr(outstanding),
-      byCurrency: outstanding,
-      invoices: new Set(open.map((r) => r.invoice.id)).size,
-      late: open.filter((r) => r.state === "late").length,
-    },
     uninvoiced,
     drafts,
     rateDate: rates?.date ?? null,

@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const STORAGE_KEY = "task-panel-width";
 export const PANEL_DEFAULT_WIDTH = 576; // sm:max-w-xl, the original width
 const MIN_WIDTH = 420;
 const KEY_STEP = 32;
@@ -11,34 +10,35 @@ const KEY_STEP = 32;
 const maxWidth = () => Math.min(Math.round(window.innerWidth * 0.9), 1280);
 const clamp = (w: number) => Math.max(MIN_WIDTH, Math.min(w, maxWidth()));
 
-function readStored(): number | null {
+function readStored(key: string): number | null {
   try {
-    const n = Number(window.localStorage.getItem(STORAGE_KEY));
+    const n = Number(window.localStorage.getItem(key));
     return Number.isFinite(n) && n > 0 ? n : null;
   } catch {
     return null;
   }
 }
 
-function store(width: number) {
+function store(key: string, width: number) {
   try {
-    window.localStorage.setItem(STORAGE_KEY, String(Math.round(width)));
+    window.localStorage.setItem(key, String(Math.round(width)));
   } catch {
     // Private mode / blocked storage — the width just isn't remembered.
   }
 }
 
 /**
- * Drag-to-resize width for the right-edge task panel. The width is a per-viewer
+ * Drag-to-resize width for a right-edge panel (task, client); each panel
+ * remembers its own width under `storageKey`. The width is a per-viewer
  * convenience, so it lives in localStorage (never shared, safe to lose).
  */
-export function usePanelWidth() {
+export function usePanelWidth(storageKey = "task-panel-width") {
   // Lazy read is safe: the sheet renders in a client-only portal, so this
   // width never has to match server HTML.
   const [width, setWidth] = useState(() =>
     typeof window === "undefined"
       ? PANEL_DEFAULT_WIDTH
-      : clamp(readStored() ?? PANEL_DEFAULT_WIDTH),
+      : clamp(readStored(storageKey) ?? PANEL_DEFAULT_WIDTH),
   );
   const [dragging, setDragging] = useState(false);
   // Width to return to when "Collapse" undoes "Expand".
@@ -53,8 +53,8 @@ export function usePanelWidth() {
   const commit = useCallback((w: number) => {
     const next = clamp(w);
     setWidth(next);
-    store(next);
-  }, []);
+    store(storageKey, next);
+  }, [storageKey]);
 
   const handleProps = {
     role: "separator" as const,

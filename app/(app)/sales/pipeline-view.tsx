@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { DealView } from "@/lib/sales/queries";
-import { formatDateShort } from "@/lib/format";
+import { formatDateShort, sentenceEnum } from "@/lib/format";
+import { LEAD_SOURCE_LABELS } from "@/lib/sales/pure";
 import { PageHeader } from "@/components/page-header";
 import { PillButton } from "@/components/pill-button";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,8 @@ import { DealDialog, type SalesChoices } from "./deal-dialog";
 import { PipelineBoard } from "./pipeline-board";
 import { StagesDialog } from "./stages-dialog";
 import { ImportDialog } from "./import-dialog";
+import { DealPanel, useOpenDeal, useOpenDealId } from "./deal-panel";
+import { ClientPanel } from "@/components/clients/client-panel";
 
 type Open = { kind: "deal"; id?: string } | { kind: "stages" } | { kind: "import" } | null;
 
@@ -27,7 +30,11 @@ export function PipelineView({ deals, choices, header, filters }: { deals: DealV
   const pathname = usePathname();
   const params = useSearchParams();
   const view: ViewMode = params.get("view") === "list" ? "list" : "kanban";
-  const [open, setOpen] = useState<Open>(() => (params.get("deal") ? { kind: "deal", id: params.get("deal")! } : null));
+  // A deal opens as a side panel (`?deal=`); the dialog is for new deals and edits.
+  const [open, setOpen] = useState<Open>(null);
+  const openPanel = useOpenDeal();
+  const panelId = useOpenDealId();
+  const edit = (id: string) => setOpen({ kind: "deal", id });
   const openDeal = deals.find((d) => open?.kind === "deal" && d.id === open.id);
 
   const setView = (v: ViewMode) => {
@@ -75,24 +82,26 @@ export function PipelineView({ deals, choices, header, filters }: { deals: DealV
             action={choices.canManage ? <PillButton onClick={() => setOpen({ kind: "deal" })}>New deal</PillButton> : null}
           />
         ) : view === "kanban" ? (
-          <PipelineBoard deals={deals} choices={choices} onOpen={(id) => setOpen({ kind: "deal", id })} />
+          <PipelineBoard deals={deals} choices={choices} onOpen={openPanel} onEdit={edit} />
         ) : (
-          <DealsTable deals={deals} choices={choices} onOpen={(id) => setOpen({ kind: "deal", id })} />
+          <DealsTable deals={deals} choices={choices} onOpen={openPanel} selectedId={panelId} />
         )}
       </div>
       {open?.kind === "deal" && (open.id ? openDeal : true) && <DealDialog deal={openDeal} choices={choices} onClose={() => setOpen(null)} />}
+      <DealPanel deals={deals} choices={choices} onEdit={edit} />
+      <ClientPanel scope="Pipeline" />
       {open?.kind === "stages" && <StagesDialog stages={choices.stages} onClose={() => setOpen(null)} />}
       {open?.kind === "import" && <ImportDialog onClose={() => setOpen(null)} />}
     </div>
   );
 }
 
-function DealsTable({ deals, choices, onOpen }: { deals: DealView[]; choices: SalesChoices; onOpen: (id: string) => void }) {
+function DealsTable({ deals, choices, onOpen, selectedId }: { deals: DealView[]; choices: SalesChoices; onOpen: (id: string) => void; selectedId: string | null }) {
   const stageName = new Map(choices.stages.map((s) => [s.id, s.name]));
   const columns: Column<DealView>[] = [
     {
       id: "title",
-      header: "Deal",
+      header: "Lead",
       primary: true,
       sortValue: (d) => d.title,
       cell: (d) => (
@@ -101,7 +110,13 @@ function DealsTable({ deals, choices, onOpen }: { deals: DealView[]; choices: Sa
         </button>
       ),
     },
-    { id: "client", header: "Client", sortValue: (d) => d.client?.name ?? d.prospectName ?? "", cell: (d) => d.client?.name ?? <span className="text-muted-foreground">{d.prospectName}</span> },
+    {
+      id: "company",
+      header: "Company",
+      sortValue: (d) => d.company?.name ?? d.client?.name ?? "",
+      cell: (d) => d.company?.name ?? d.client?.name ?? <span className="text-muted-foreground">—</span>,
+    },
+    { id: "person", header: "Person", sortValue: (d) => d.person?.name ?? "", cell: (d) => d.person?.name ?? <span className="text-muted-foreground">—</span> },
     {
       id: "stage",
       header: "Stage",
@@ -109,7 +124,6 @@ function DealsTable({ deals, choices, onOpen }: { deals: DealView[]; choices: Sa
       cell: (d) => <StatusBadge value={d.category} label={stageName.get(d.stageId) ?? "—"} />,
     },
     { id: "value", header: "Value", align: "right", sortValue: (d) => d.valueIdr ?? d.value, cell: (d) => <MoneyText value={d.value} currency={d.currency} /> },
-    { id: "prob", header: "Prob.", align: "right", sortValue: (d) => d.probability, cell: (d) => <span className="tabular">{d.probability}%</span> },
     {
       id: "weighted",
       header: "Weighted (IDR)",
@@ -117,9 +131,16 @@ function DealsTable({ deals, choices, onOpen }: { deals: DealView[]; choices: Sa
       sortValue: (d) => (d.valueIdr ?? 0) * d.probability,
       cell: (d) => (d.category === "open" && d.valueIdr !== null ? <MoneyText value={Math.round((d.valueIdr * d.probability) / 100)} currency="IDR" /> : "—"),
     },
-    { id: "close", header: "Expected close", sortValue: (d) => d.expectedClose ?? "", cell: (d) => <span className="tabular">{d.expectedClose ? formatDateShort(d.expectedClose) : "—"}</span> },
+    { id: "lead-date", header: "Lead in", sortValue: (d) => d.leadDate, cell: (d) => <span className="tabular">{formatDateShort(d.leadDate)}</span> },
+    {
+      id: "last-contact",
+      header: "Last contact",
+      sortValue: (d) => d.lastContactOn ?? "",
+      cell: (d) => <span className="tabular">{d.lastContactOn ? formatDateShort(d.lastContactOn) : "—"}</span>,
+    },
     { id: "owner", header: "Owner", sortValue: (d) => d.owner?.name ?? "", cell: (d) => d.owner?.name ?? "—" },
-    { id: "source", header: "Source", sortValue: (d) => d.leadSource ?? "", cell: (d) => d.leadSource ?? "—" },
+    { id: "source", header: "Source", sortValue: (d) => d.leadSource ?? "", cell: (d) => (d.leadSource ? LEAD_SOURCE_LABELS[d.leadSource] : "—") },
+    { id: "type", header: "Type", sortValue: (d) => d.leadType ?? "", cell: (d) => (d.leadType ? sentenceEnum(d.leadType) : "—") },
     {
       id: "age",
       header: "In stage",
@@ -129,5 +150,15 @@ function DealsTable({ deals, choices, onOpen }: { deals: DealView[]; choices: Sa
     },
     { id: "project", header: "Project", sortValue: (d) => d.project?.code ?? "", cell: (d) => (d.project ? <span className="tabular">{d.project.code}</span> : "—") },
   ];
-  return <DataTable columns={columns} rows={deals} getRowId={(d) => d.id} emptyTitle="No deals match" emptyDescription="Clear the search or filters." />;
+  return (
+    <DataTable
+      columns={columns}
+      rows={deals}
+      getRowId={(d) => d.id}
+      onRowClick={(d) => onOpen(d.id)}
+      isRowSelected={(d) => d.id === selectedId}
+      emptyTitle="No deals match"
+      emptyDescription="Clear the search or filters."
+    />
+  );
 }

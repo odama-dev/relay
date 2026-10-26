@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { asUser, requireUser } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import { run, fail, parseOrFail, type ActionResult } from "@/lib/actions";
 import { logActivity } from "@/lib/audit";
 import { perms } from "@/lib/roles";
@@ -11,6 +13,7 @@ import { parseIsoDate } from "@/lib/time/pure";
 import { parseCsv } from "@/lib/import/csv";
 import { validateDeals, type DealImportRow } from "@/lib/sales/import";
 import { clientCodeSchema, dealMoveSchema, dealSchema, stageSchema, uuid } from "@/lib/validation";
+import { getDealRecord, type DealRecord } from "@/lib/sales/record";
 
 /**
  * Phase 2 · M9 — pipeline and deals. Writes run under RLS (Sales module);
@@ -20,27 +23,54 @@ import { clientCodeSchema, dealMoveSchema, dealSchema, stageSchema, uuid } from 
 
 const FORBIDDEN = "Only people with the Sales module manage the pipeline.";
 
+/**
+ * A deal just linked to a person / company you've already emailed moves on
+ * now, not at the next sync (system half, after the RLS write succeeded).
+ */
+async function advanceFromMail(d: { personId?: string | null; companyId?: string | null }) {
+  if (d.personId || d.companyId) await prisma.$queryRaw`SELECT app.mail_advance_deals(NULL)`;
+}
+
 function revalidateSales() {
   revalidatePath("/sales");
   revalidatePath("/sales/report");
   revalidatePath("/dashboard");
 }
 
-function dealData(d: z.output<typeof dealSchema>) {
+/**
+ * The form's fields, plus the client and prospect name that follow the
+ * associated company (a client's company links the deal to that client; the
+ * name is what "Add as client" uses when the deal is won).
+ */
+async function dealData(tx: Prisma.TransactionClient, d: z.output<typeof dealSchema>) {
+  const [company, person, stage] = await Promise.all([
+    d.companyId ? tx.crmCompany.findUnique({ where: { id: d.companyId }, select: { name: true, clientId: true } }) : null,
+    d.personId ? tx.crmPerson.findUnique({ where: { id: d.personId }, select: { name: true } }) : null,
+    tx.pipelineStage.findUnique({ where: { id: d.stageId }, select: { category: true, probability: true } }),
+  ]);
+  if (d.companyId && !company) fail("That company isn't in Companies.");
+  if (d.personId && !person) fail("That person isn't in People.");
+  if (!stage) fail("Stage not found.");
   return {
-    title: d.title,
-    clientId: d.clientId ?? null,
-    prospectName: d.clientId ? null : (d.prospectName ?? null),
-    value: d.value,
-    currency: d.currency,
-    probability: d.probability,
-    expectedClose: d.expectedClose ? parseIsoDate(d.expectedClose) : null,
-    ownerId: d.ownerId ?? null,
-    leadSource: d.leadSource ?? null,
-    serviceType: d.serviceType ?? null,
-    stageId: d.stageId,
-    lostReason: d.lostReason ?? null,
-    notes: d.notes ?? null,
+    data: {
+      title: d.title,
+      personId: d.personId ?? null,
+      companyId: d.companyId ?? null,
+      clientId: company?.clientId ?? null,
+      prospectName: company?.clientId ? null : (company?.name ?? person?.name ?? d.title),
+      leadDate: parseIsoDate(d.leadDate),
+      lastContactOn: d.lastContactOn ? parseIsoDate(d.lastContactOn) : null,
+      value: d.value,
+      currency: d.currency,
+      ownerId: d.ownerId ?? null,
+      leadSource: d.leadSource,
+      leadType: d.leadType,
+      stageId: d.stageId,
+      // deals_last_stage keeps an open deal's last stage on its stage.
+      ...(stage.category !== "open" && d.lastStageId ? { lastStageId: d.lastStageId } : {}),
+      lostReason: d.lostReason ?? null,
+    },
+    probability: stage.probability,
   };
 }
 
@@ -49,8 +79,12 @@ export async function createDeal(raw: unknown): Promise<ActionResult<{ id: strin
     const user = await requireUser();
     if (!perms.manageDeals(user)) fail(FORBIDDEN);
     const d = parseOrFail(dealSchema, raw);
-    const deal = await asUser(user, (tx) => tx.deal.create({ data: dealData(d) }));
+    const deal = await asUser(user, async (tx) => {
+      const { data, probability } = await dealData(tx, d);
+      return tx.deal.create({ data: { ...data, probability } });
+    });
     await logActivity({ actorId: user.id, entityType: "deal", entityId: deal.id, action: "created", metadata: { title: d.title, value: d.value, currency: d.currency } });
+    await advanceFromMail(d);
     revalidateSales();
     return { id: deal.id };
   });
@@ -61,9 +95,17 @@ export async function updateDeal(id: unknown, raw: unknown): Promise<ActionResul
     const user = await requireUser();
     const dealId = parseOrFail(uuid, id);
     const d = parseOrFail(dealSchema, raw);
-    const res = await asUser(user, (tx) => tx.deal.updateMany({ where: { id: dealId }, data: dealData(d) }));
+    const res = await asUser(user, async (tx) => {
+      const current = await tx.deal.findUnique({ where: { id: dealId }, select: { projectId: true, clientId: true } });
+      if (!current) fail("Deal not found.");
+      const { data } = await dealData(tx, d);
+      // Once the deal has its project, the client stays put (deals_derive).
+      if (current.projectId) Object.assign(data, { clientId: current.clientId, prospectName: null });
+      return tx.deal.updateMany({ where: { id: dealId }, data });
+    });
     if (res.count === 0) fail(FORBIDDEN);
     await logActivity({ actorId: user.id, entityType: "deal", entityId: dealId, action: "updated" });
+    await advanceFromMail(d);
     revalidateSales();
   });
 }
@@ -153,6 +195,19 @@ export async function updateStage(id: unknown, raw: unknown): Promise<ActionResu
     const res = await asUser(user, (tx) => tx.pipelineStage.updateMany({ where: { id: stageId }, data: d }));
     if (res.count === 0) fail(FORBIDDEN);
     await logActivity({ actorId: user.id, entityType: "pipeline_stage", entityId: stageId, action: "updated", metadata: d });
+    revalidateSales();
+  });
+}
+
+/** Hide a stage from the board and the pickers (its deals still count), or show it again. */
+export async function setStageHidden(id: unknown, hidden: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const user = await requireUser();
+    const stageId = parseOrFail(uuid, id);
+    const isHidden = parseOrFail(z.boolean(), hidden);
+    const res = await asUser(user, (tx) => tx.pipelineStage.updateMany({ where: { id: stageId }, data: { isHidden } }));
+    if (res.count === 0) fail(FORBIDDEN);
+    await logActivity({ actorId: user.id, entityType: "pipeline_stage", entityId: stageId, action: isHidden ? "hidden" : "shown" });
     revalidateSales();
   });
 }
@@ -258,4 +313,14 @@ export async function importDeals(raw: unknown): Promise<ActionResult<{ created:
     revalidateSales();
     return result;
   });
+}
+
+/** The deal side panel's data (`?deal=<id>` on the pipeline), read under RLS. */
+export async function loadDealRecord(dealId: unknown): Promise<DealRecord> {
+  const user = await requireUser();
+  const id = uuid.safeParse(dealId);
+  if (!id.success || !perms.viewPipeline(user)) throw new Error("Deal not found");
+  const record = await getDealRecord(user, id.data);
+  if (!record) throw new Error("Deal not found");
+  return record;
 }

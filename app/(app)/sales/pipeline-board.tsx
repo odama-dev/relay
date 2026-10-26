@@ -29,11 +29,25 @@ type Result = { ok: true } | { ok: false; error: string };
  * Dragging a deal changes its stage; Lost asks why; Won offers the project.
  * Columns show the IDR total of their deals.
  */
-export function PipelineBoard({ deals, choices, onOpen }: { deals: DealView[]; choices: SalesChoices; onOpen: (id: string, stageId?: string) => void }) {
+export function PipelineBoard({
+  deals,
+  choices,
+  onOpen,
+  onEdit,
+}: {
+  deals: DealView[];
+  choices: SalesChoices;
+  /** A card opens the deal panel. */
+  onOpen: (id: string) => void;
+  /** Opens the deal dialog (e.g. to create the project once won). */
+  onEdit: (id: string) => void;
+}) {
   const router = useRouter();
   const dropAnimation = useKanbanDropAnimation();
   const dndId = useId();
-  const stageIds = choices.stages.map((s) => s.id);
+  // Hidden stages (Stages dialog) leave the board; their deals still count in the totals.
+  const visibleStages = choices.stages.filter((s) => !s.isHidden);
+  const stageIds = visibleStages.map((s) => s.id);
   const items: Item[] = deals.map((d, i) => ({ ...d, status: d.stageId, boardOrder: i }));
   const [asking, setAsking] = useState<{ title: string } | null>(null);
   const answer = useRef<((reason: string | null) => void) | null>(null);
@@ -50,15 +64,15 @@ export function PipelineBoard({ deals, choices, onOpen }: { deals: DealView[]; c
     let lostReason: string | undefined;
     if (stage?.category === "lost") {
       const reason = await askReason(deal?.title ?? "this deal");
-      // An empty error keeps the card where it was without a toast.
-      if (!reason) return { ok: false, error: "" };
-      lostReason = reason;
+      // Cancelled: an empty error keeps the card where it was without a toast.
+      if (reason === null) return { ok: false, error: "" };
+      lostReason = reason || undefined;
     }
     const res = await moveDeal(id, { stageId, lostReason });
     if (!res.ok) return res;
     router.refresh();
     if (stage?.category === "won" && !deal?.project && choices.canCreateProject) {
-      toast.success(`${deal?.title ?? "Deal"} won`, { action: { label: "Create project", onClick: () => onOpen(id) } });
+      toast.success(`${deal?.title ?? "Deal"} won`, { action: { label: "Create project", onClick: () => onEdit(id) } });
     }
     return { ok: true };
   };
@@ -75,7 +89,7 @@ export function PipelineBoard({ deals, choices, onOpen }: { deals: DealView[]; c
   return (
     <DndContext id={dndId} {...handlers}>
       <div className="-mx-1 flex min-h-[calc(100dvh-16rem)] gap-2 overflow-x-auto px-1 pb-2">
-        {choices.stages.map((stage) => {
+        {visibleStages.map((stage) => {
           const ids = cols[stage.id] ?? [];
           const total = ids.reduce((sum, id) => sum + (byId.get(id)?.valueIdr ?? 0), 0);
           return (
@@ -96,7 +110,7 @@ export function PipelineBoard({ deals, choices, onOpen }: { deals: DealView[]; c
                     key={id}
                     deal={deal}
                     editable={choices.canManage}
-                    stages={choices.stages.filter((s) => s.id !== stage.id)}
+                    stages={visibleStages.filter((s) => s.id !== stage.id)}
                     onOpen={() => onOpen(id)}
                     onMove={(s) => moveTo(id, s)}
                   />
@@ -185,14 +199,16 @@ export function DealCardBody({ deal, onOpen }: { deal: DealView; onOpen?: () => 
       ) : (
         <span className="pr-6 font-medium">{deal.title}</span>
       )}
-      <span className="text-muted-foreground truncate text-caption">{deal.client?.name ?? deal.prospectName ?? "—"}</span>
+      <span className="text-muted-foreground truncate text-caption">
+        {[deal.company?.name ?? deal.client?.name ?? deal.prospectName, deal.person?.name].filter(Boolean).join(" · ") || "—"}
+      </span>
       <span className="flex items-center justify-between gap-2">
         <MoneyText value={deal.value} currency={deal.currency} />
         {deal.category === "open" && <span className="text-muted-foreground tabular text-caption">{deal.probability}%</span>}
       </span>
       <span className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-caption">
         {deal.owner && <span className="truncate">{deal.owner.name}</span>}
-        {deal.expectedClose && deal.category === "open" && <span className="tabular">Close {formatDateShort(deal.expectedClose)}</span>}
+        {deal.lastContactOn && <span className="tabular">Contacted {formatDateShort(deal.lastContactOn)}</span>}
         {deal.project && <span className="tabular">{deal.project.code}</span>}
         {deal.stale && <StatusBadge value="stale" label={`${deal.daysInStage}d in stage`} />}
       </span>
@@ -209,21 +225,21 @@ function LostReasonDialog({ title, onDone }: { title: string; onDone: (reason: s
           className="grid gap-4"
           onSubmit={(e) => {
             e.preventDefault();
-            if (reason.trim()) onDone(reason.trim());
+            onDone(reason.trim());
           }}
         >
           <DialogHeader>
             <DialogTitle>Why was {title} lost?</DialogTitle>
-            <DialogDescription>Lost reasons show up in the Sales report.</DialogDescription>
+            <DialogDescription>Optional — lost reasons help the Sales report.</DialogDescription>
           </DialogHeader>
-          <FormField label="Reason" htmlFor="lost-reason" required>
+          <FormField label="Lost reason" htmlFor="lost-reason">
             <Input id="lost-reason" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Went with another studio" />
           </FormField>
           <DialogFooter>
             <Button type="button" variant="tertiary" onClick={() => onDone(null)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!reason.trim()}>
+            <Button type="submit">
               Move to lost
             </Button>
           </DialogFooter>

@@ -10,9 +10,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/select-field";
 import { RowActions } from "@/components/row-actions";
+import { cn } from "@/lib/utils";
 import { StatusDot } from "@/components/status-badge";
 import { icons } from "@/components/icon";
-import { createStage, deleteStage, moveStage, updateStage } from "./actions";
+import { createStage, deleteStage, moveStage, setStageHidden, updateStage } from "./actions";
 
 type Category = (typeof STAGE_CATEGORIES)[number];
 const CATEGORY_LABEL: Record<Category, string> = { open: "Open", won: "Won", lost: "Lost" };
@@ -82,7 +83,7 @@ export function StagesDialog({ stages, onClose }: { stages: StageView[]; onClose
       <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>Pipeline stages</DialogTitle>
-          <DialogDescription>Each stage is Open, Won or Lost — reports count by category. A deal entering a stage takes its probability.</DialogDescription>
+          <DialogDescription>Each stage is Open, Won or Lost — reports count by category. A deal entering a stage takes its probability. Hidden stages leave the board and the pickers. Contacted and Replied also move by themselves from connected mailboxes.</DialogDescription>
         </DialogHeader>
         <ul className="flex flex-col gap-1 text-body">
           {stages.map((s, i) =>
@@ -91,7 +92,16 @@ export function StagesDialog({ stages, onClose }: { stages: StageView[]; onClose
             ) : (
               <li key={s.id} className="hover:bg-accent/40 flex h-10 items-center gap-3 rounded-lg px-2">
                 <StatusDot value={s.category} label={CATEGORY_LABEL[s.category]} />
-                <span className="min-w-0 flex-1 truncate font-medium">{s.name}</span>
+                <span className={cn("min-w-0 flex-1 truncate font-medium", s.isHidden && "text-muted-foreground")}>
+                  {s.name}
+                  {s.isHidden && <span className="text-caption font-normal"> · Hidden</span>}
+                  {s.autoKey && (
+                    <span className="text-muted-foreground text-caption font-normal">
+                      {" "}
+                      · Auto from email ({s.autoKey === "contacted" ? "you wrote" : "they replied"})
+                    </span>
+                  )}
+                </span>
                 <span className="text-muted-foreground w-16 text-caption">{CATEGORY_LABEL[s.category]}</span>
                 <span className="text-muted-foreground tabular w-10 text-right text-caption">{s.probability}%</span>
                 <span className="text-muted-foreground tabular w-16 text-right text-caption">{s.deals} deals</span>
@@ -105,6 +115,11 @@ export function StagesDialog({ stages, onClose }: { stages: StageView[]; onClose
                         setDraft({ name: s.name, category: s.category, probability: s.probability });
                         setEditing(s.id);
                       },
+                    },
+                    {
+                      label: s.isHidden ? "Show on board" : "Hide from board",
+                      icon: s.isHidden ? "eye" : "eyeOff",
+                      onSelect: () => void act(() => setStageHidden(s.id, !s.isHidden), s.isHidden ? "Stage shown" : "Stage hidden"),
                     },
                     { label: "Move up", hidden: i === 0, onSelect: () => void act(() => moveStage(s.id, -1)) },
                     { label: "Move down", hidden: i === stages.length - 1, onSelect: () => void act(() => moveStage(s.id, 1)) },

@@ -74,7 +74,7 @@ export default async function ProjectsPage({
               },
             ]}
           />
-          <ProjectsTable rows={rows} />
+          <ProjectsTable rows={rows} showHealth={perms.showHealth(user)} />
         </>
       )}
     </div>

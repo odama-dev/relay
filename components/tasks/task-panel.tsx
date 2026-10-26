@@ -99,7 +99,8 @@ export function TaskPanel() {
         style={{ "--task-panel-w": `${width}px` } as React.CSSProperties}
         className={cn(
           "flex w-full flex-col gap-0 overflow-y-auto p-0 data-[side=right]:sm:w-(--task-panel-w) data-[side=right]:sm:max-w-none",
-          !dragging && "motion-safe:transition-[width]",
+          // Keep the sheet's slide-in (translate, opacity) when adding the resize easing.
+          !dragging && "motion-safe:transition-[translate,opacity,width]",
           dragging && "select-none",
         )}
       >

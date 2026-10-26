@@ -21,6 +21,7 @@ import {
   sectionSchema,
   taskPatchSchema,
   taskSchema,
+  ownTaskSchema,
   TASK_STATUSES,
   uuid,
 } from "@/lib/validation";
@@ -125,6 +126,54 @@ export async function createTask(projectId: unknown, raw: unknown): Promise<Acti
     if (d.status === "review") await notifyReview(user, task.id, "in_progress", "review");
     revalidateTasks(pid);
     return { id: task.id };
+  });
+}
+
+/**
+ * Any role adds a task for itself to an open project it found by search:
+ * the database joins it to the project and picks the section ("Sales" for
+ * Sales, created when missing), then the task is created under RLS.
+ */
+export async function createOwnTask(raw: unknown): Promise<ActionResult<{ id: string; projectId: string }>> {
+  return run(async () => {
+    const user = await requireUser();
+    const d = parseOrFail(ownTaskSchema, raw);
+    const task = await asUser(user, async (tx) => {
+      const [row] = await tx.$queryRaw<{ sid: string }[]>`SELECT app.join_project_for_task(${d.projectId}::uuid) AS sid`;
+      if (!row?.sid) fail("Couldn't add you to that project.");
+      const last = await tx.task.aggregate({ where: { sectionId: row.sid }, _max: { position: true } });
+      const typeId = (await tx.taskType.findUnique({ where: { key: "regular" }, select: { id: true } }))?.id ?? null;
+      const t = await tx.task.create({
+        data: {
+          projectId: d.projectId,
+          sectionId: row.sid,
+          title: d.title,
+          ownerId: user.id,
+          priority: d.priority,
+          dueDate: d.dueDate ? parseIsoDate(d.dueDate) : null,
+          typeId,
+          position: (last._max.position ?? 0) + 1024,
+          createdBy: user.id,
+        },
+      });
+      await activity(tx, user, t.id, "created");
+      return t;
+    });
+    await logActivity({ actorId: user.id, entityType: "task", entityId: task.id, action: "created", metadata: { projectId: d.projectId, own: true } });
+    revalidateTasks(d.projectId);
+    return { id: task.id, projectId: d.projectId };
+  });
+}
+
+/** Open projects to add a task to — code, name, client, whether you're on it (app.search_projects). */
+export async function searchProjectsForTask(q: unknown): Promise<ActionResult<{ id: string; code: string; name: string; client: string | null; member: boolean }[]>> {
+  return run(async () => {
+    const user = await requireUser();
+    const query = parseOrFail(z.string().max(100), q ?? "");
+    const rows = await asUser(user, (tx) =>
+      tx.$queryRaw<{ id: string; code: string; name: string; client_name: string | null; is_member: boolean }[]>`SELECT * FROM app.search_projects(${query})`,
+    );
+    return rows.map((r) => ({ id: r.id, code: r.code, name: r.name, client: r.client_name, member: r.is_member }));
   });
 }
 

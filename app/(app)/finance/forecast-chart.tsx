@@ -20,14 +20,14 @@ export type ForecastPoint = {
   target: number | null;
 };
 
-/** Received in solid blue; what's expected in steps of the same blue, overdue in the warning tone. Everything expected is hatched. */
+/** Received in solid blue; what's expected in steps of orange, overdue in red. Everything expected is hatched. */
 const SERIES = [
   { key: "actual", label: "Received", color: "var(--chart-in)", opacity: 1 },
-  { key: "invoiced", label: "Invoiced", color: "var(--chart-in)", opacity: 0.6 },
-  { key: "overdue", label: "Overdue", color: "var(--warning)", opacity: 0.85 },
-  { key: "retainer", label: "Retainer", color: "var(--chart-in)", opacity: 0.4 },
-  { key: "contract", label: "Contract remaining", color: "var(--chart-in)", opacity: 0.25 },
-  { key: "draft", label: "Draft", color: "var(--chart-in)", opacity: 0.12 },
+  { key: "invoiced", label: "Invoiced", color: "var(--chart-forecast)", opacity: 0.85 },
+  { key: "overdue", label: "Overdue", color: "var(--chart-out)", opacity: 0.75 },
+  { key: "retainer", label: "Retainer", color: "var(--chart-forecast)", opacity: 0.6 },
+  { key: "contract", label: "Contract remaining", color: "var(--chart-forecast)", opacity: 0.38 },
+  { key: "draft", label: "Draft", color: "var(--chart-forecast)", opacity: 0.2 },
 ] as const;
 
 const config: ChartConfig = Object.fromEntries([

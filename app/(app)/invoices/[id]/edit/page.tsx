@@ -5,6 +5,7 @@ import { perms } from "@/lib/roles";
 import { getInvoice } from "@/lib/invoices/queries";
 import { PageHeader } from "@/components/page-header";
 import { InvoiceEditor } from "@/components/invoice/invoice-editor";
+import type { CURRENCIES } from "@/lib/validation";
 
 export const metadata = { title: "Edit invoice" };
 
@@ -22,10 +23,11 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
       />
       <InvoiceEditor
         projectId={inv.project.id}
-        currency={inv.currency}
         invoiceId={inv.id}
         initial={{
           issueDate: inv.issueDate,
+          currency: inv.currency as (typeof CURRENCIES)[number],
+          billTo: { name: inv.billTo.name, address: inv.billTo.address ?? "", email: inv.billTo.email ?? "" },
           notes: inv.notes ?? "",
           kind: inv.kind,
           platform: inv.platform,

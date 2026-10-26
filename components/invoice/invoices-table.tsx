@@ -2,16 +2,16 @@
 
 import type { InvoiceRow } from "@/lib/invoices/queries";
 import { DataTable, type Column } from "@/components/data-table";
-import { StatusBadge } from "@/components/status-badge";
+import { InvoiceStatusMenu } from "@/components/invoice/invoice-status-menu";
 import { MoneyText } from "@/components/money-text";
-import { INVOICE_KIND_LABELS, INVOICE_STATUS_LABELS, PLATFORM_LABELS } from "@/lib/invoices/pure";
+import { INVOICE_KIND_LABELS, PLATFORM_LABELS } from "@/lib/invoices/pure";
 import { formatDateShort } from "@/lib/format";
 
 /**
  * M5.9 — number, client, project, terms, currency, total, paid, outstanding,
  * due date, status; Phase 2 · M9 adds type, platform, sent and paid dates.
  */
-export function InvoicesTable({ rows, hideProject }: { rows: InvoiceRow[]; hideProject?: boolean }) {
+export function InvoicesTable({ rows, hideProject, canEditStatus = false }: { rows: InvoiceRow[]; hideProject?: boolean; canEditStatus?: boolean }) {
   const columns: Column<InvoiceRow>[] = [
     {
       id: "number",
@@ -60,7 +60,7 @@ export function InvoicesTable({ rows, hideProject }: { rows: InvoiceRow[]; hideP
     { id: "sent", header: "Sent", sortValue: (r) => r.sentOn ?? "", cell: (r) => <span className="tabular">{r.sentOn ? formatDateShort(r.sentOn) : "—"}</span> },
     { id: "due", header: "Next due", sortValue: (r) => r.nextDue ?? "", cell: (r) => <span className="tabular">{r.nextDue ? formatDateShort(r.nextDue) : "—"}</span> },
     { id: "paidOn", header: "Paid on", sortValue: (r) => r.paidOn ?? "", cell: (r) => <span className="tabular">{r.paidOn ? formatDateShort(r.paidOn) : "—"}</span> },
-    { id: "status", header: "Status", sortValue: (r) => r.status, cell: (r) => <StatusBadge value={r.status} label={INVOICE_STATUS_LABELS[r.status]} /> },
+    { id: "status", header: "Status", sortValue: (r) => r.status, cell: (r) => <InvoiceStatusMenu id={r.id} status={r.status} manual={r.manualStatus} canEdit={canEditStatus} /> },
   ];
   return (
     <DataTable

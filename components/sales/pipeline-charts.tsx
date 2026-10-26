@@ -154,3 +154,123 @@ export function BridgeChart({ bridge, height = 240, className }: { bridge: Bridg
     </figure>
   );
 }
+
+const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/**
+ * Horizontal funnel: deals that reached each step, one blue, each bar
+ * labelled with its count and the share of the first step.
+ */
+export function FunnelChart({ steps, className }: { steps: { label: string; deals: number; valueIdr: number }[]; className?: string }) {
+  const top = steps[0]?.deals ?? 0;
+  const rows = steps.map((s) => ({ ...s, label2: `${s.deals}${top > 0 && s !== steps[0] ? ` · ${Math.round((s.deals / top) * 100)}%` : ""}` }));
+  const config: ChartConfig = { deals: { label: "Deals", color: "var(--chart-in)" } };
+  return (
+    <figure className={cn("flex flex-col gap-2", className)}>
+      <ChartContainer config={config} className="aspect-auto w-full" style={{ height: Math.max(120, rows.length * 52) }}>
+        <BarChart data={rows} layout="vertical" margin={{ top: 0, right: 72, bottom: 0, left: 0 }} barCategoryGap="22%">
+          <XAxis type="number" hide domain={[0, Math.max(1, top)]} />
+          <YAxis type="category" dataKey="label" tickLine={false} axisLine={false} width={104} />
+          <Tooltip
+            cursor={{ fill: "var(--muted)", opacity: 0.4 }}
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const r = payload[0]!.payload as (typeof rows)[number];
+              return (
+                <TooltipBox
+                  title={r.label}
+                  rows={[
+                    ["Deals", String(r.deals)],
+                    ["Of the first step", top > 0 ? `${Math.round((r.deals / top) * 100)}%` : "—"],
+                    ["Value", idr(r.valueIdr)],
+                  ]}
+                />
+              );
+            }}
+          />
+          <Bar dataKey="deals" fill="var(--chart-in)" radius={4} maxBarSize={32} isAnimationActive={false}>
+            <LabelList dataKey="label2" position="right" className="fill-muted-foreground text-caption" />
+          </Bar>
+        </BarChart>
+      </ChartContainer>
+    </figure>
+  );
+}
+
+/** Lead sources side by side: leads in gray, won in blue; win rate in the tooltip and the label. */
+export function SourceChart({
+  rows,
+  className,
+}: {
+  rows: { label: string; leads: number; won: number; lost: number; winRate: number | null; wonIdr: number }[];
+  className?: string;
+}) {
+  const data = [...rows].sort((a, b) => b.leads - a.leads).map((r) => ({ ...r, rate: r.winRate === null ? "" : `${r.winRate}% won` }));
+  const config: ChartConfig = { leads: { label: "Leads", color: "var(--chart-3)" }, won: { label: "Won", color: "var(--chart-in)" } };
+  return (
+    <figure className={cn("flex flex-col gap-2", className)}>
+      <Legend
+        items={[
+          { label: "Leads", color: "var(--chart-3)" },
+          { label: "Won", color: "var(--chart-in)" },
+        ]}
+      />
+      <ChartContainer config={config} className="aspect-auto w-full" style={{ height: Math.max(140, data.length * 48) }}>
+        <BarChart data={data} layout="vertical" margin={{ top: 0, right: 72, bottom: 0, left: 0 }} barGap={2} barCategoryGap="24%">
+          <XAxis type="number" hide allowDecimals={false} />
+          <YAxis type="category" dataKey="label" tickLine={false} axisLine={false} width={136} />
+          <Tooltip
+            cursor={{ fill: "var(--muted)", opacity: 0.4 }}
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const r = payload[0]!.payload as (typeof data)[number];
+              return (
+                <TooltipBox
+                  title={r.label}
+                  rows={[
+                    ["Leads", String(r.leads)],
+                    ["Won", String(r.won)],
+                    ["Lost", String(r.lost)],
+                    ["Win rate (closed)", r.winRate === null ? "—" : `${r.winRate}%`],
+                    ["Won value", idr(r.wonIdr)],
+                  ]}
+                />
+              );
+            }}
+          />
+          <Bar dataKey="leads" fill="var(--chart-3)" radius={4} maxBarSize={14} isAnimationActive={false} />
+          <Bar dataKey="won" fill="var(--chart-in)" radius={4} maxBarSize={14} isAnimationActive={false}>
+            <LabelList dataKey="rate" position="right" className="fill-muted-foreground text-caption" />
+          </Bar>
+        </BarChart>
+      </ChartContainer>
+    </figure>
+  );
+}
+
+/** Money won per month (IDR), one blue bar per month; the tooltip names the deal count. */
+export function WonByMonthChart({ data, height = 240, className }: { data: { label: string; title: string; deals: number; valueIdr: number }[]; height?: number; className?: string }) {
+  const config: ChartConfig = { valueIdr: { label: "Won", color: "var(--chart-in)" } };
+  return (
+    <figure className={cn("flex flex-col gap-2", className)}>
+      <ChartContainer config={config} className="aspect-auto w-full" style={{ height }}>
+        <BarChart data={data} margin={{ top: 20, right: 4, bottom: 0, left: 0 }} barCategoryGap="32%">
+          <CartesianGrid vertical={false} stroke="var(--border)" />
+          <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} interval={0} />
+          <YAxis tickLine={false} axisLine={false} width={56} tickFormatter={axis} />
+          <Tooltip
+            cursor={{ fill: "var(--muted)", opacity: 0.4 }}
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const r = payload[0]!.payload as (typeof data)[number];
+              return <TooltipBox title={r.title} rows={[["Won", idr(r.valueIdr)], ["Deals", count(r.deals, "deal")]]} />;
+            }}
+          />
+          <Bar dataKey="valueIdr" fill="var(--chart-in)" radius={4} maxBarSize={36} isAnimationActive={false}>
+            <LabelList dataKey="valueIdr" position="top" className="fill-muted-foreground text-caption" formatter={(v: unknown) => (typeof v === "number" && v > 0 ? axis(v) : "")} />
+          </Bar>
+        </BarChart>
+      </ChartContainer>
+    </figure>
+  );
+}

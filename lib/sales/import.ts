@@ -1,4 +1,5 @@
 import { isIsoDate, type IsoDate } from "@/lib/time/pure";
+import { normalizeLeadSource, resolveStageName } from "@/lib/sales/pure";
 
 /**
  * Deals from an Attio CSV export (PRD Phase 2 "Migrasi"). Attio exports many
@@ -28,7 +29,7 @@ const REQUIRED: Field[] = ["title", "stage", "value"];
 
 export const DEAL_IMPORT_TEMPLATE =
   Object.values(DEAL_IMPORT_COLUMNS).join(",") +
-  "\nrec_01,Website redesign,Acme Inc,Proposal sent,150000000,IDR,sales@odama.io,2026-12-15,Referral,Website,,2026-09-01,\n";
+  "\nrec_01,Website redesign,Acme Inc,Proposal,150000000,IDR,sales@odama.io,2026-12-15,Referral,Website,,2026-09-01,\n";
 
 export type DealImport = {
   externalId: string | null;
@@ -109,7 +110,7 @@ export function validateDeals(rows: string[][], ctx: DealImportContext, mode: "s
       const externalId = get("externalId") || null;
       const title = get("title");
       if (!title) errors.push("Deal name is empty");
-      const stageId = ctx.stages.get(get("stage").toLowerCase());
+      const stageId = resolveStageName(get("stage"), ctx.stages);
       if (!stageId) errors.push(`Unknown stage "${get("stage")}" — add it to the pipeline first`);
       const value = parseAmount(get("value"));
       if (value === null) errors.push(`Value "${get("value")}" isn't an amount`);
@@ -154,7 +155,7 @@ export function validateDeals(rows: string[][], ctx: DealImportContext, mode: "s
           currency,
           ownerId,
           expectedClose,
-          leadSource: get("leadSource") || null,
+          leadSource: normalizeLeadSource(get("leadSource")),
           serviceType: get("serviceType") || null,
           lostReason: get("lostReason") || null,
           createdAt: createdOn ? new Date(`${createdOn}T12:00:00+07:00`) : null,
