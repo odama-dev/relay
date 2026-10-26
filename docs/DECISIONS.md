@@ -665,3 +665,39 @@ overdue / blocked / ownerless tasks.
   it; values stay. Cells are edited in place.
 - **Invoice stats** on the list (over the current filters): sent, unpaid
   (IDR), overdue (IDR), waiting verification, collected (IDR), drafts.
+
+## Hosting: Supabase Cloud + Vercel (2026-10-26)
+
+- **Production runs on Supabase Cloud and Vercel**, not the self-hosted VPS
+  the PRD "Stack & arsitektur" sketched. Production project
+  `ytduomlxaozuukwiguar` in `ap-southeast-1` (Singapore), Vercel `sin1`. A
+  first project created on 2026-10-23 landed in Seoul by mistake and was
+  replaced on 2026-10-26 before any real data. Same code, same
+  migrations; only the connection strings and the bucket bootstrap differ.
+  `docs/VPS_DEPLOY.md` stays as the legacy alternative. Steps:
+  `docs/SUPABASE_SETUP.md` §3.
+- **Supavisor pooler, two modes.** Vercel functions are IPv4-only and the
+  direct `db.<ref>` host is IPv6, so everything goes through the pooler:
+  runtime `DATABASE_URL` in transaction mode (`pgbouncer=true`,
+  `connection_limit=10`), migrations through `DIRECT_URL` in session mode.
+  `connection_limit=1`, the usual serverless advice, deadlocks this app: a
+  page fans out parallel queries and runs system-connection reads while a
+  `withRls()` transaction holds a connection, so Prisma's per-process pool
+  needs headroom; Supavisor multiplexes those onto the real pool.
+  `withRls()` stays correct under transaction pooling because the role and
+  the JWT claims are transaction-local settings inside one Prisma interactive
+  transaction; the codebase has no session-level `SET`, no advisory lock held
+  across statements, and no `LISTEN`.
+- **Cloud operations run from a developer machine** via `pnpm cloud:*`
+  (`scripts/with-env.mjs` + `.env.cloud`, git-ignored), never from Vercel: the
+  script refuses localhost URLs and the default seed password, so `.env` and
+  `.env.cloud` cannot be mixed up. Buckets come from `supabase/config.toml`
+  through `supabase seed buckets --linked`, so local and Cloud share one
+  bucket definition.
+- **Legacy JWT API keys**, not the new `sb_publishable_` / `sb_secret_` keys,
+  so the same env names work on the CLI stack, Cloud and the legacy VPS.
+- **`pnpm test:rls` never touches production.** It drops the `public` and
+  `app` schemas of `TEST_DATABASE_URL`; it runs against the local CLI
+  database or a separate staging project only (`docs/SUPABASE_SETUP.md` §6).
+  Production RLS is trusted because the same migrations passed the suite
+  locally and `pnpm cloud:status` confirms they were all applied.

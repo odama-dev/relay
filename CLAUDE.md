@@ -15,7 +15,7 @@ Visual language: **Fluid Functionalism** (https://www.fluidfunctionalism.com/doc
 - Next.js 16 (App Router, Turbopack) + React 19 + TypeScript
 - Tailwind v4 + **Fluid Functionalism** (Base UI flavor, rounded, compact, Untitled UI icons; `components/fluid-root.tsx`), Inter (opsz), system theme default + light/dark (next-themes). Add more with `npx shadcn@latest add @fluid/base/<name>`
 - Icons: **Untitled UI Icons only** (`@untitledui/icons`) via `components/icon.tsx` — never import an icon package elsewhere
-- Prisma 6 (pinned) + PostgreSQL — Supabase (CLI locally, self-hosted on the VPS)
+- Prisma 6 (pinned) + PostgreSQL — Supabase (CLI locally; **Supabase Cloud + Vercel** in production, reached through the Supavisor pooler: transaction mode at runtime, session mode for migrations)
 - Supabase Auth (email + password, invite-only) and Storage (private buckets)
 - Resend (email), Slack Web API (bot DMs), Xendit (payment links + webhook)
 - Zod (`lib/validation.ts`), React Hook Form, TanStack Query, dnd-kit, Tiptap, Vitest, Puppeteer (invoice PDF)
@@ -64,7 +64,8 @@ pnpm db:seed        # realistic seed (one person per role)
 pnpm db:seed:history # + a year of history (clients, projects, time, invoices, payments, expenses); run once
 pnpm dev            # Next dev (Turbopack)
 pnpm typecheck && pnpm lint && pnpm test && pnpm build
-pnpm test:rls       # RLS + invoice-flow integration tests on TEST_DATABASE_URL
+pnpm test:rls       # RLS + invoice-flow integration tests; WIPES TEST_DATABASE_URL
+pnpm cloud:migrate  # prisma migrate deploy to Supabase Cloud (.env.cloud); also cloud:status, cloud:seed, cloud:buckets
 ```
 
 ## Local auth
@@ -72,7 +73,15 @@ pnpm test:rls       # RLS + invoice-flow integration tests on TEST_DATABASE_URL
 With the Supabase env vars set, sign in with a seeded email and
 `SEED_PASSWORD`. Without them, `DEV_AUTH_BYPASS=true` signs you in as
 `DEV_AUTH_EMAIL` (default: first `ADMIN_EMAILS`) — change it to test a role.
-Supabase / VPS setup: `docs/SUPABASE_SETUP.md`, `docs/VPS_DEPLOY.md`.
+Supabase setup (local + Cloud/Vercel): `docs/SUPABASE_SETUP.md`. The self-hosted
+VPS path in `docs/VPS_DEPLOY.md` is legacy.
+
+## RLS tests
+
+`pnpm test:rls` drops and re-migrates the `public` and `app` schemas of
+`TEST_DATABASE_URL`. Run it only against the local Supabase database or a
+separate staging Supabase project — never against the production project, and
+never with `.env.cloud` values.
 
 ## Workflow (PRD "Tips build")
 

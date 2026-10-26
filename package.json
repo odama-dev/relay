@@ -22,6 +22,11 @@
     "db:reset": "prisma migrate reset --force",
     "db:up": "supabase start",
     "db:down": "supabase stop",
+    "cloud:migrate": "node scripts/with-env.mjs .env.cloud prisma migrate deploy",
+    "cloud:status": "node scripts/with-env.mjs .env.cloud prisma migrate status",
+    "cloud:buckets": "supabase seed buckets --linked",
+    "cloud:seed": "node scripts/with-env.mjs .env.cloud tsx prisma/seed.ts",
+    "cloud:seed:history": "node scripts/with-env.mjs .env.cloud tsx prisma/seed-history.ts",
     "test:rls": "node scripts/test-rls.mjs"
   },
   "prisma": {

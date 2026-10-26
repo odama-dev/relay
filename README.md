@@ -8,7 +8,8 @@ platforms.
 - Spec: [`PRD/PRD-Fase-1-MVP.md`](PRD/PRD-Fase-1-MVP.md)
 - Status per milestone: [`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md)
 - Decisions: [`docs/DECISIONS.md`](docs/DECISIONS.md)
-- Setup: [`docs/SUPABASE_SETUP.md`](docs/SUPABASE_SETUP.md) · Deploy: [`docs/VPS_DEPLOY.md`](docs/VPS_DEPLOY.md)
+- Setup (local) & production on Supabase Cloud + Vercel: [`docs/SUPABASE_SETUP.md`](docs/SUPABASE_SETUP.md)
+- Legacy self-hosted VPS deploy: [`docs/VPS_DEPLOY.md`](docs/VPS_DEPLOY.md)
 - Agent guidance: [`CLAUDE.md`](CLAUDE.md)
 
 ## Getting started
@@ -30,10 +31,18 @@ or the server log; Xendit links open a local payment simulator.
 
 ```bash
 pnpm typecheck && pnpm lint && pnpm test && pnpm build
-pnpm test:rls            # RLS + invoice flow against TEST_DATABASE_URL
+pnpm test:rls            # RLS + invoice flow; WIPES TEST_DATABASE_URL (local or a separate
+                         # staging Supabase project, never production)
 ```
+
+## Production
+
+Supabase Cloud (Postgres + RLS, Auth, Storage; Singapore) and Vercel
+(`sin1`, Vercel Cron). Schema, RLS and seed are pushed from a developer machine
+with `pnpm cloud:migrate` / `pnpm cloud:seed`, which read `.env.cloud`. Steps in
+[`docs/SUPABASE_SETUP.md`](docs/SUPABASE_SETUP.md) §3.
 
 ## Stack
 
 Next.js 16 · React 19 · TypeScript · Tailwind v4 · shadcn/ui · Untitled UI Icons ·
-Prisma 6 · Supabase (Postgres + RLS, Auth, Storage) · Resend · Slack · Xendit · Vitest
+Prisma 6 · Supabase Cloud (Postgres + RLS, Auth, Storage) · Vercel · Resend · Slack · Xendit · Vitest
