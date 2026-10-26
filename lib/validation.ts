@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ACCESS_LEVELS, APP_MODULES, DIVISIONS, EMPLOYMENT_TYPES, USER_ROLES } from "@/lib/roles";
 import { isIsoDate } from "@/lib/time/pure";
+import { LEAD_SOURCES, LEAD_TYPES } from "@/lib/sales/pure";
 
 /**
  * Shared Zod schemas — imported by client forms and server actions so each
@@ -230,6 +231,15 @@ export const taskSchema = z.object({
 });
 export type TaskInput = z.input<typeof taskSchema>;
 
+/** A task you add for yourself to any open project (My Tasks); you own it. */
+export const ownTaskSchema = z.object({
+  projectId: uuid,
+  title: text(240).min(1, "Enter a title"),
+  priority: z.enum(TASK_PRIORITIES).default("normal"),
+  dueDate: optionalIsoDate,
+});
+export type OwnTaskInput = z.input<typeof ownTaskSchema>;
+
 export const taskPatchSchema = z
   .object({
     title: text(240).min(1, "Enter a title"),
@@ -320,6 +330,11 @@ export const INVOICE_KINDS = ["dp", "term", "final"] as const;
 export const invoiceSchema = z.object({
   projectId: uuid,
   issueDate: isoDate,
+  /** Filled from the project and its client; editable on a draft. */
+  currency: z.enum(CURRENCIES),
+  billToName: text(200).min(1, "Who is the invoice for?"),
+  billToAddress: optionalText(1000),
+  billToEmail: optionalEmail,
   notes: optionalText(2000),
   /** Phase 2 · M9 — DP / term / final, and how the client pays. */
   kind: z.enum(INVOICE_KINDS).nullable().optional().transform((v) => v ?? null),
@@ -328,6 +343,10 @@ export const invoiceSchema = z.object({
   requests: z.array(paymentRequestSchema).min(1, "Add at least one payment request").max(12),
 });
 export type InvoiceInput = z.input<typeof invoiceSchema>;
+
+/** What Sales / Finance may set by hand on an issued invoice; null = automatic. */
+export const MANUAL_INVOICE_STATUSES = ["sent", "partially_paid", "payment_submitted", "paid", "overdue"] as const;
+export const manualInvoiceStatus = z.enum(MANUAL_INVOICE_STATUSES).nullable();
 
 export const sendInvoiceSchema = z.object({
   to: z.array(email).min(1, "Add a recipient").max(10),
@@ -615,23 +634,22 @@ export const stageSchema = z.object({
 });
 export type StageInput = z.input<typeof stageSchema>;
 
-export const dealSchema = z
-  .object({
-    title: text(160).min(1, "Name the deal"),
-    clientId: optionalUuid,
-    prospectName: optionalText(160),
-    value: amount,
-    currency: z.enum(CURRENCIES),
-    probability,
-    expectedClose: optionalIsoDate,
-    ownerId: optionalUuid,
-    leadSource: optionalText(80),
-    serviceType: optionalText(80),
-    stageId: uuid,
-    lostReason: optionalText(500),
-    notes: optionalText(4000),
-  })
-  .refine((v) => v.clientId || v.prospectName, { message: "Choose a client or name the prospect", path: ["prospectName"] });
+export const dealSchema = z.object({
+  title: text(160).min(1, "Name the lead"),
+  personId: optionalUuid,
+  companyId: optionalUuid,
+  leadDate: isoDate,
+  lastContactOn: optionalIsoDate,
+  value: amount,
+  currency: z.enum(CURRENCIES),
+  ownerId: optionalUuid,
+  leadSource: z.enum(LEAD_SOURCES).nullable().optional().transform((v) => v ?? null),
+  leadType: z.enum(LEAD_TYPES).nullable().optional().transform((v) => v ?? null),
+  stageId: uuid,
+  /** Only read when the deal is won or lost; an open deal's last stage is its stage. */
+  lastStageId: optionalUuid,
+  lostReason: optionalText(500),
+});
 export type DealInput = z.input<typeof dealSchema>;
 
 export const dealMoveSchema = z.object({ stageId: uuid, lostReason: optionalText(500) });
@@ -697,5 +715,59 @@ export const crmColumnEditSchema = crmColumnSchema.pick({ name: true, options: t
 export const crmCompanySchema = z.object({ name: text(160).min(1, "Name the company"), domain: optionalText(200) });
 export const crmPersonSchema = z.object({ name: text(160).min(1, "Enter a name"), email: optionalEmail, companyId: optionalUuid });
 
+/** A note on a client, company, person or deal (at least one). */
+export const crmNoteSchema = z
+  .object({
+    body: text(5000).min(1, "Write the note"),
+    clientId: optionalUuid,
+    companyId: optionalUuid,
+    personId: optionalUuid,
+    dealId: optionalUuid,
+  })
+  .refine((v) => v.clientId || v.companyId || v.personId || v.dealId, { message: "Choose what the note is about", path: ["body"] });
+export const crmNoteEditSchema = z.object({ body: text(5000).min(1, "Write the note") });
+
 /** One cell: a built-in field by name, or a custom column by id. */
 export const crmFieldSchema = z.object({ object: z.enum(CRM_OBJECTS), id: uuid, key: z.string().min(1).max(60), value: z.unknown() });
+
+// ---------------------------------------------------------------------------
+// Mail — connected mailboxes (IMAP + SMTP) and sending from them
+// ---------------------------------------------------------------------------
+
+const host = text(200)
+  .min(1, "Enter the server")
+  .regex(/^[a-z0-9.-]+$/i, "A host name like imap.yourdomain.com");
+const port = z.number({ error: "Enter the port" }).int().min(1).max(65535);
+
+export const mailAccountSchema = z.object({
+  email,
+  displayName: optionalText(120),
+  imapHost: host,
+  imapPort: port,
+  imapSecure: z.boolean(),
+  smtpHost: host,
+  smtpPort: port,
+  smtpSecure: z.boolean(),
+  username: text(200).min(1, "Enter the username (often the full address)"),
+  password: z.string().min(1, "Enter the password or app password").max(500),
+  shared: z.boolean(),
+});
+export type MailAccountInput = z.input<typeof mailAccountSchema>;
+
+export const mailAccountEditSchema = z.object({
+  displayName: optionalText(120),
+  shared: z.boolean(),
+  isActive: z.boolean(),
+  /** Only when it changed; the connection is tested again. */
+  password: z.string().max(500).optional().transform((v) => v || undefined),
+});
+
+export const composeMailSchema = z.object({
+  accountId: uuid,
+  to: z.array(email).min(1, "Add a recipient").max(20),
+  cc: z.array(email).max(20).default([]),
+  subject: text(300).min(1, "Enter a subject"),
+  text: z.string().trim().min(1, "Write the message").max(50_000),
+  inReplyTo: optionalText(500),
+});
+export type ComposeMailInput = z.input<typeof composeMailSchema>;

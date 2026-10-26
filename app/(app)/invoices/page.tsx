@@ -88,7 +88,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           action={canCreate ? <PillButton href="/invoices/new">New invoice</PillButton> : null}
         />
       ) : (
-        <InvoicesTable rows={rows} />
+        <InvoicesTable rows={rows} canEditStatus={perms.editInvoices(user)} />
       )}
     </div>
   );

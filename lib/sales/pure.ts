@@ -8,6 +8,50 @@ import { addDays, addMonths, monthStart, parseIsoDate, type IsoDate } from "@/li
  * counted apart (`unconverted`) rather than as zero.
  */
 
+/** Where a lead came from — the list Sales picks from (CHECK deals_lead_source). */
+export const LEAD_SOURCES = ["dribbble", "website", "email", "contra", "behance", "referral", "other"] as const;
+
+/** Stage names from before the outreach pipeline (Oct 2026), as an import may still carry them. */
+const LEGACY_STAGES: Record<string, string> = {
+  lead: "researched",
+  qualified: "contacted",
+  "discovery call": "call booked",
+  committed: "proposal",
+  "proposal sent": "proposal",
+  negotiation: "proposal",
+};
+
+/** A stage name from a file → the pipeline stage it means (lower-cased); current names win over legacy ones. */
+export function resolveStageName(name: string, stages: Map<string, string>): string | undefined {
+  const key = name.trim().toLowerCase();
+  return stages.get(key) ?? stages.get(LEGACY_STAGES[key] ?? "");
+}
+export type LeadSource = (typeof LEAD_SOURCES)[number];
+export const LEAD_SOURCE_LABELS: Record<LeadSource, string> = {
+  dribbble: "Dribbble",
+  website: "Website",
+  email: "Email",
+  contra: "Contra",
+  behance: "Behance",
+  referral: "Referral / networking",
+  other: "Others",
+};
+export const LEAD_TYPES = ["inbound", "outbound"] as const;
+
+/** A free-text source (Attio export, old data) mapped onto the list; empty stays empty. */
+export function normalizeLeadSource(raw: string | null | undefined): LeadSource | null {
+  const v = raw?.trim().toLowerCase();
+  if (!v) return null;
+  if ((LEAD_SOURCES as readonly string[]).includes(v)) return v as LeadSource;
+  if (v.startsWith("dribbb")) return "dribbble";
+  if (v.includes("website") || v === "web") return "website";
+  if (v.includes("mail")) return "email";
+  if (v.startsWith("contra")) return "contra";
+  if (v.startsWith("behance")) return "behance";
+  if (v.includes("referral") || v.includes("network") || v === "existing client") return "referral";
+  return "other";
+}
+
 const DAY_MS = 86_400_000;
 // `|| 0` turns -0 (a sum that rounds to nothing) into 0.
 const round2 = (n: number) => Math.round(n * 100) / 100 || 0;
@@ -129,4 +173,59 @@ export function pipelineBridge(moves: StageMove[], month: IsoDate, liveEnd?: num
   }
   const end = liveEnd ?? openValueAt(moves, next);
   return { month, start, added: round2(added), won: round2(won), lost: round2(lost), adjusted: round2(end - (start + added - won - lost)), end: round2(end) };
+}
+
+// ---------------------------------------------------------------------------
+// Sales report — funnel, lead sources, money won per month
+// ---------------------------------------------------------------------------
+
+export type FunnelDeal = {
+  /** Board position of the furthest open stage the deal reached; null if none. */
+  furthestOpen: number | null;
+  won: boolean;
+  valueIdr: number | null;
+};
+export type FunnelStep = { label: string; position: number | "won" };
+
+/**
+ * How many deals reached each step (and their IDR value). Reaching a later
+ * open stage — or winning — counts for every earlier step, so a deal that
+ * skipped a stage still flows through the funnel.
+ */
+export function funnel(deals: FunnelDeal[], steps: FunnelStep[]) {
+  return steps.map((s) => {
+    const reached = deals.filter((d) => d.won || (s.position !== "won" && d.furthestOpen !== null && d.furthestOpen >= s.position));
+    return { label: s.label, deals: reached.length, valueIdr: round2(reached.reduce((sum, d) => sum + (d.valueIdr ?? 0), 0)) };
+  });
+}
+
+export type SourceDeal = { source: LeadSource | null; category: StageCategory; valueIdr: number | null };
+
+/** Per lead source: leads, won, lost, win rate of the closed ones, and IDR won. Sources with no leads are left out. */
+export function leadSourceComparison(deals: SourceDeal[]) {
+  const keys: (LeadSource | "unknown")[] = [...LEAD_SOURCES, "unknown"];
+  return keys
+    .map((key) => {
+      const mine = deals.filter((d) => (d.source ?? "unknown") === key);
+      const won = mine.filter((d) => d.category === "won");
+      const lost = mine.filter((d) => d.category === "lost").length;
+      return {
+        source: key,
+        label: key === "unknown" ? "Not set" : LEAD_SOURCE_LABELS[key],
+        leads: mine.length,
+        won: won.length,
+        lost,
+        winRate: won.length + lost > 0 ? Math.round((won.length / (won.length + lost)) * 100) : null,
+        wonIdr: round2(won.reduce((s, d) => s + (d.valueIdr ?? 0), 0)),
+      };
+    })
+    .filter((r) => r.leads > 0);
+}
+
+/** IDR value of the deals won in each month (`yyyy-mm-01` keys, in order). */
+export function wonByMonth(deals: { category: StageCategory; closedOn: IsoDate | null; valueIdr: number | null }[], months: IsoDate[]) {
+  return months.map((month) => {
+    const won = deals.filter((d) => d.category === "won" && d.closedOn !== null && monthStart(d.closedOn) === month);
+    return { month, deals: won.length, valueIdr: round2(won.reduce((s, d) => s + (d.valueIdr ?? 0), 0)) };
+  });
 }

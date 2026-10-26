@@ -1,7 +1,11 @@
 import "server-only";
 import { env, resendConfigured } from "@/lib/env";
 
-export type MailAttachment = { filename: string; content: Buffer; contentType?: string };
+export type MailAttachment = {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+};
 
 export type MailInput = {
   to: string[];
@@ -38,7 +42,10 @@ export async function sendMail(input: MailInput): Promise<MailResult> {
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
-      headers: { Authorization: `Bearer ${env.resendApiKey}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${env.resendApiKey}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
         from: input.from ?? env.mailFrom,
         to: input.to,
@@ -54,16 +61,25 @@ export async function sendMail(input: MailInput): Promise<MailResult> {
         })),
       }),
     });
-    const body = (await res.json().catch(() => ({}))) as { id?: string; message?: string };
-    if (!res.ok) return { ok: false, error: body.message ?? `Resend answered ${res.status}` };
+    const body = (await res.json().catch(() => ({}))) as {
+      id?: string;
+      message?: string;
+    };
+    if (!res.ok)
+      return {
+        ok: false,
+        error: body.message ?? `Resend answered ${res.status}`,
+      };
     return { ok: true, id: body.id ?? null };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Couldn't reach Resend" };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Couldn't reach Resend",
+    };
   }
 }
 
-const escapeHtml = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /**
  * The one email layout: plain, monochrome, a single call to action. Body
@@ -80,9 +96,7 @@ export function renderEmail({
   action?: { label: string; url: string };
   footer?: string;
 }): { html: string; text: string } {
-  const p = paragraphs
-    .map((t) => `<p style="margin:0 0 14px;font-size:14px;line-height:22px;color:#3f3f46">${escapeHtml(t)}</p>`)
-    .join("");
+  const p = paragraphs.map((t) => `<p style="margin:0 0 14px;font-size:14px;line-height:22px;color:#3f3f46">${escapeHtml(t)}</p>`).join("");
   const button = action
     ? `<p style="margin:22px 0"><a href="${escapeHtml(action.url)}" style="display:inline-block;background:#09090b;color:#ffffff;text-decoration:none;font-size:14px;font-weight:500;padding:10px 18px;border-radius:999px">${escapeHtml(action.label)}</a></p>
        <p style="margin:0 0 14px;font-size:12px;line-height:18px;color:#71717a">Or open this link: <a href="${escapeHtml(action.url)}" style="color:#71717a">${escapeHtml(action.url)}</a></p>`

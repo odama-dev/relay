@@ -39,6 +39,7 @@ export type InvoiceRow = {
   id: string;
   number: string | null;
   status: InvoiceStatus;
+  manualStatus: boolean;
   client: { id: string; name: string };
   project: { id: string; code: string; name: string };
   currency: string;
@@ -96,6 +97,7 @@ export async function listInvoices(user: CurrentUser, f: InvoiceFilters): Promis
       id: i.id,
       number: i.number,
       status: i.status,
+      manualStatus: i.statusOverride !== null,
       client: i.client,
       project: i.project,
       currency: i.currency,
@@ -173,6 +175,7 @@ export async function getInvoice(user: CurrentUser, id: string) {
     id: inv.id,
     number: inv.number,
     status: inv.status,
+    manualStatus: inv.statusOverride !== null,
     currency: inv.currency,
     issueDate: isoDate(inv.issueDate),
     notes: inv.notes,

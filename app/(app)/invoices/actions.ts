@@ -12,7 +12,7 @@ import { parseIsoDate } from "@/lib/time/pure";
 import { invoiceTotal, itemAmount, requestsMatchTotal } from "@/lib/invoices/pure";
 import { ensurePaymentLinks, sendInvoice } from "@/lib/invoices/issue";
 import { matchPayment, proofRejected, proofVerified, refreshInvoice } from "@/lib/invoices/payments";
-import { invoiceSchema, proofDecisionSchema, sendInvoiceSchema, uuid } from "@/lib/validation";
+import { invoiceSchema, manualInvoiceStatus, proofDecisionSchema, sendInvoiceSchema, uuid } from "@/lib/validation";
 
 const FORBIDDEN = "Only Sales and Finance manage invoices.";
 
@@ -41,7 +41,7 @@ function checkTotals(d: z.output<typeof invoiceSchema>, currency: string): numbe
   return total;
 }
 
-/** M5.1 — a draft invoice from a client project; client, currency and billing details come from the project. */
+/** M5.1 — a draft invoice for a client project. Currency and bill-to start from the project and client; Sales may change them. */
 export async function createInvoice(raw: unknown): Promise<ActionResult<{ id: string }>> {
   return run(async () => {
     const user = await requireUser();
@@ -52,25 +52,25 @@ export async function createInvoice(raw: unknown): Promise<ActionResult<{ id: st
       if (!project) fail("Project not found.");
       if (project.kind !== "client" || !project.client) fail("Internal projects aren't invoiced.");
       if (project.status !== "active" && project.status !== "on_hold") fail("Invoices are only created for Active or On hold projects.");
-      const total = checkTotals(d, project.currency);
+      const total = checkTotals(d, d.currency);
       const inv = await tx.invoice.create({
         data: {
           projectId: project.id,
           clientId: project.client.id,
-          currency: project.currency,
+          currency: d.currency,
           issueDate: parseIsoDate(d.issueDate),
           notes: d.notes ?? null,
           kind: d.kind,
           platform: d.platform,
-          billToName: project.client.name,
-          billToAddress: project.client.billingAddress,
-          billToEmail: project.client.billingEmail,
+          billToName: d.billToName,
+          billToAddress: d.billToAddress ?? null,
+          billToEmail: d.billToEmail ?? null,
           subtotal: total,
           total,
           createdBy: user.id,
         },
       });
-      await writeLines(tx, inv.id, d, project.currency);
+      await writeLines(tx, inv.id, d, d.currency);
       return inv;
     });
     await logActivity({ actorId: user.id, entityType: "invoice", entityId: invoice.id, action: "created" });
@@ -89,13 +89,24 @@ export async function updateInvoice(id: unknown, raw: unknown): Promise<ActionRe
       const inv = await tx.invoice.findUnique({ where: { id: invoiceId } });
       if (!inv) fail("Invoice not found.");
       if (inv.status !== "draft") fail("A sent invoice is locked. Void it and create a new one.");
-      const total = checkTotals(d, inv.currency);
+      const total = checkTotals(d, d.currency);
       const res = await tx.invoice.updateMany({
         where: { id: invoiceId },
-        data: { issueDate: parseIsoDate(d.issueDate), notes: d.notes ?? null, kind: d.kind, platform: d.platform, subtotal: total, total },
+        data: {
+          issueDate: parseIsoDate(d.issueDate),
+          currency: d.currency,
+          billToName: d.billToName,
+          billToAddress: d.billToAddress ?? null,
+          billToEmail: d.billToEmail ?? null,
+          notes: d.notes ?? null,
+          kind: d.kind,
+          platform: d.platform,
+          subtotal: total,
+          total,
+        },
       });
       if (res.count === 0) fail(FORBIDDEN);
-      await writeLines(tx, invoiceId, d, inv.currency);
+      await writeLines(tx, invoiceId, d, d.currency);
       return inv.projectId;
     });
     await logActivity({ actorId: user.id, entityType: "invoice", entityId: invoiceId, action: "updated" });
@@ -140,6 +151,31 @@ export async function sendInvoiceToClient(id: unknown, raw: unknown): Promise<Ac
     await logActivity({ actorId: user.id, entityType: "invoice", entityId: invoiceId, action: "sent", metadata: { to: d.to } });
     revalidateInvoice(invoiceId, inv.projectId);
     return res;
+  });
+}
+
+/**
+ * A status set by hand on an issued invoice (Sales / Finance), or `null` to
+ * go back to the one derived from payments and due dates. The database keeps
+ * the manual one until it's cleared (invoices_guard).
+ */
+export async function setInvoiceStatus(id: unknown, raw: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const user = await requireUser();
+    const invoiceId = parseOrFail(uuid, id);
+    const status = parseOrFail(manualInvoiceStatus, raw);
+    const inv = await asUser(user, async (tx) => {
+      const found = await tx.invoice.findUnique({ where: { id: invoiceId }, select: { projectId: true, status: true } });
+      if (!found) fail("Invoice not found.");
+      const res = await tx.invoice.updateMany({ where: { id: invoiceId }, data: { statusOverride: status } });
+      if (res.count === 0) fail(FORBIDDEN);
+      return found;
+    });
+    // Back to automatic: derive it again from the payments.
+    if (status === null) await refreshInvoice(invoiceId);
+    await logActivity({ actorId: user.id, entityType: "invoice", entityId: invoiceId, action: "status_set", metadata: { from: inv.status, to: status ?? "automatic" } });
+    revalidateInvoice(invoiceId, inv.projectId);
+    revalidatePath("/dashboard");
   });
 }
 

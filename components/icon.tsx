@@ -12,6 +12,7 @@ import {
   CheckCircle,
   CheckSquare,
   ChevronDown,
+  ChevronUp,
   ChevronLeft,
   ChevronLeftDouble,
   ChevronRight,
@@ -148,6 +149,7 @@ export const icons = {
   chevronLeft: ChevronLeft,
   chevronRight: ChevronRight,
   chevronDown: ChevronDown,
+  chevronUp: ChevronUp,
   sidebarCollapse: ChevronLeftDouble,
   sidebarExpand: ChevronRightDouble,
   // status / feedback

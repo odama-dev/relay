@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { currencyDecimals, formatMoney } from "@/lib/format";
 import { INVOICE_KIND_LABELS, invoiceTotal, itemAmount, PLATFORM_LABELS, requestsMatchTotal, splitByPercent, fromMinor, toMinor } from "@/lib/invoices/pure";
-import { INVOICE_KINDS, PAYMENT_PLATFORMS } from "@/lib/validation";
+import { CURRENCIES, INVOICE_KINDS, PAYMENT_PLATFORMS } from "@/lib/validation";
 import { createInvoice, updateInvoice } from "@/app/(app)/invoices/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,26 +21,38 @@ export type EditorItem = { description: string; quantity: number | null; unitPri
 export type EditorRequest = { label: string; amount: number | null; percent: number | null; dueDate: string };
 type Kind = (typeof INVOICE_KINDS)[number];
 type Platform = (typeof PAYMENT_PLATFORMS)[number];
+type Currency = (typeof CURRENCIES)[number];
 
 /**
  * M5.1 — items (description, quantity, unit price → amount) and payment
  * requests entered as a percentage or an amount, which must add up to the
- * total. Used for new drafts and for editing a draft.
+ * total. Bill-to and currency start from the project's client and can be
+ * changed; the PDF keeps the studio's invoice design. Used for new drafts
+ * and for editing a draft.
  */
 export function InvoiceEditor({
   projectId,
-  currency,
   invoiceId,
   initial,
 }: {
   projectId: string;
-  currency: string;
   /** Present when editing a draft. */
   invoiceId?: string;
-  initial: { issueDate: string; notes: string; kind: Kind | null; platform: Platform; items: EditorItem[]; requests: EditorRequest[] };
+  initial: {
+    issueDate: string;
+    currency: Currency;
+    billTo: { name: string; address: string; email: string };
+    notes: string;
+    kind: Kind | null;
+    platform: Platform;
+    items: EditorItem[];
+    requests: EditorRequest[];
+  };
 }) {
   const router = useRouter();
   const [issueDate, setIssueDate] = useState(initial.issueDate);
+  const [currency, setCurrency] = useState<Currency>(initial.currency);
+  const [billTo, setBillTo] = useState(initial.billTo);
   const [kind, setKind] = useState<Kind | null>(initial.kind);
   const [platform, setPlatform] = useState<Platform>(initial.platform);
   const [notes, setNotes] = useState(initial.notes);
@@ -66,10 +78,15 @@ export function InvoiceEditor({
   const save = async () => {
     if (validItems.length === 0) return void toast.error("Add at least one item.");
     if (!balanced) return void toast.error("The payment requests must add up to the total.");
+    if (!billTo.name.trim()) return void toast.error("Who is the invoice for? Fill in Bill to.");
     setBusy(true);
     const payload = {
       projectId,
       issueDate,
+      currency,
+      billToName: billTo.name,
+      billToAddress: billTo.address,
+      billToEmail: billTo.email,
       notes,
       kind,
       platform,
@@ -87,9 +104,25 @@ export function InvoiceEditor({
 
   return (
     <div className="flex max-w-4xl flex-col gap-8">
+      <FormSection title="Bill to" description="Starts from the client's billing details — change them for this invoice only.">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormField label="Name" htmlFor="inv-bill-name" required>
+            <Input id="inv-bill-name" value={billTo.name} onChange={(e) => setBillTo({ ...billTo, name: e.target.value })} />
+          </FormField>
+          <FormField label="Email" htmlFor="inv-bill-email">
+            <Input id="inv-bill-email" type="email" value={billTo.email} onChange={(e) => setBillTo({ ...billTo, email: e.target.value })} />
+          </FormField>
+          <FormField label="Address" htmlFor="inv-bill-address" className="sm:col-span-2">
+            <Textarea id="inv-bill-address" rows={2} value={billTo.address} onChange={(e) => setBillTo({ ...billTo, address: e.target.value })} />
+          </FormField>
+        </div>
+      </FormSection>
       <div className="grid gap-4 sm:grid-cols-[200px_1fr]">
         <FormField label="Issue date" htmlFor="inv-date" required>
           <DatePicker id="inv-date" value={issueDate} onChange={setIssueDate} className="w-full" />
+        </FormField>
+        <FormField label="Currency" htmlFor="inv-currency" hint="Starts from the project. Amounts below are in this currency.">
+          <SelectField id="inv-currency" value={currency} onChange={(v) => setCurrency(v as Currency)} options={CURRENCIES.map((c) => ({ value: c, label: c }))} className="sm:w-[200px]" />
         </FormField>
         <FormField label="Notes" htmlFor="inv-notes" hint="Printed on the invoice.">
           <Textarea id="inv-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />

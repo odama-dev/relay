@@ -8,27 +8,28 @@
  *   pnpm db:seed:sales
  */
 import { PrismaClient, type StageCategory } from "@prisma/client";
+import { normalizeLeadSource } from "../lib/sales/pure";
 
 const DAY = 86_400_000;
 const at = (daysAgo: number) => new Date(Date.now() - daysAgo * DAY);
 
 // title, company, value, currency, path of [stage, days ago entered], source, service
 const DEALS: [string, string, number, string, [string, number][], string, string, string?][] = [
-  ["Brand refresh", "Kopi Senja", 180_000_000, "IDR", [["Lead", 150], ["Qualified", 132], ["Proposal sent", 118], ["Won", 101]], "Referral", "Branding"],
-  ["Marketing site", "Nusantara Bank", 420_000_000, "IDR", [["Lead", 140], ["Qualified", 120], ["Proposal sent", 95], ["Negotiation", 70], ["Won", 52]], "Inbound", "Website"],
-  ["Mobile app MVP", "Halo Klinik", 38_000, "USD", [["Lead", 128], ["Qualified", 110], ["Proposal sent", 84], ["Lost", 60]], "Dribbble", "Product", "Chose an in-house team"],
-  ["Design system", "Tokopedia Seller", 260_000_000, "IDR", [["Lead", 100], ["Qualified", 88], ["Proposal sent", 61], ["Negotiation", 33]], "Referral", "Product"],
-  ["E-commerce rebuild", "Batik Lestari", 310_000_000, "IDR", [["Lead", 92], ["Qualified", 70], ["Proposal sent", 40]], "Awwwards", "Website"],
-  ["Pitch deck", "Arunika Ventures", 45_000_000, "IDR", [["Lead", 80], ["Qualified", 74], ["Won", 63]], "Referral", "Branding"],
-  ["SaaS dashboard", "Ledgerly", 24_000, "USD", [["Lead", 75], ["Qualified", 52], ["Proposal sent", 30], ["Negotiation", 9]], "Upwork", "Product"],
-  ["Packaging", "Teh Kita", 95_000_000, "IDR", [["Lead", 66], ["Lost", 41]], "Inbound", "Branding", "Budget moved to next year"],
-  ["Annual report", "Yayasan Cerah", 70_000_000, "IDR", [["Lead", 58], ["Qualified", 45]], "Referral", "Editorial"],
-  ["Website care retainer", "Kopi Senja", 15_000_000, "IDR", [["Lead", 40], ["Qualified", 36], ["Proposal sent", 30], ["Won", 18]], "Existing client", "Retainer"],
-  ["Rebrand", "Sinar Logistics", 16_000, "EUR", [["Lead", 34], ["Qualified", 20]], "Inbound", "Branding"],
-  ["Booking flow", "Pulau Resorts", 210_000_000, "IDR", [["Lead", 25], ["Qualified", 12], ["Proposal sent", 4]], "Dribbble", "Product"],
-  ["Landing pages", "Gudang Kreatif", 60_000_000, "IDR", [["Lead", 14]], "Inbound", "Website"],
-  ["Illustration set", "Bacaan Anak", 35_000_000, "IDR", [["Lead", 6]], "Instagram", "Illustration"],
-  ["Investor site", "Arunika Ventures", 120_000_000, "IDR", [["Lead", 21], ["Lost", 3]], "Referral", "Website", "No response after proposal"],
+  ["Brand refresh", "Kopi Senja", 180_000_000, "IDR", [["Researched", 150], ["Contacted", 132], ["Proposal", 118], ["Won", 101]], "Referral", "Branding"],
+  ["Marketing site", "Nusantara Bank", 420_000_000, "IDR", [["Researched", 140], ["Contacted", 120], ["Call booked", 95], ["Proposal", 70], ["Won", 52]], "Inbound", "Website"],
+  ["Mobile app MVP", "Halo Klinik", 38_000, "USD", [["Researched", 128], ["Contacted", 110], ["Proposal", 84], ["Lost", 60]], "Dribbble", "Product", "Chose an in-house team"],
+  ["Design system", "Tokopedia Seller", 260_000_000, "IDR", [["Researched", 100], ["Contacted", 88], ["Call booked", 61], ["Proposal", 33]], "Referral", "Product"],
+  ["E-commerce rebuild", "Batik Lestari", 310_000_000, "IDR", [["Researched", 92], ["Contacted", 70], ["Proposal", 40]], "Awwwards", "Website"],
+  ["Pitch deck", "Arunika Ventures", 45_000_000, "IDR", [["Researched", 80], ["Contacted", 74], ["Won", 63]], "Referral", "Branding"],
+  ["SaaS dashboard", "Ledgerly", 24_000, "USD", [["Researched", 75], ["Contacted", 52], ["Call booked", 30], ["Proposal", 9]], "Upwork", "Product"],
+  ["Packaging", "Teh Kita", 95_000_000, "IDR", [["Researched", 66], ["Lost", 41]], "Inbound", "Branding", "Budget moved to next year"],
+  ["Annual report", "Yayasan Cerah", 70_000_000, "IDR", [["Researched", 58], ["Contacted", 45], ["Replied", 40], ["Call booked", 31]], "Referral", "Editorial"],
+  ["Website care retainer", "Kopi Senja", 15_000_000, "IDR", [["Researched", 40], ["Contacted", 36], ["Proposal", 30], ["Won", 18]], "Existing client", "Retainer"],
+  ["Rebrand", "Sinar Logistics", 16_000, "EUR", [["Researched", 34], ["Contacted", 20], ["Replied", 12]], "Inbound", "Branding"],
+  ["Booking flow", "Pulau Resorts", 210_000_000, "IDR", [["Researched", 25], ["Contacted", 18], ["Replied", 15], ["Call booked", 12], ["Proposal", 4]], "Dribbble", "Product"],
+  ["Landing pages", "Gudang Kreatif", 60_000_000, "IDR", [["Researched", 14]], "Inbound", "Website"],
+  ["Illustration set", "Bacaan Anak", 35_000_000, "IDR", [["Researched", 6]], "Instagram", "Illustration"],
+  ["Investor site", "Arunika Ventures", 120_000_000, "IDR", [["Researched", 21], ["Lost", 3]], "Referral", "Website", "No response after proposal"],
 ];
 
 const RATES: Record<string, number> = { IDR: 1, USD: 16_300, EUR: 17_600 };
@@ -57,7 +58,9 @@ export async function seedSales(prisma: PrismaClient) {
         probability: stage(first![0]).probability,
         stageId: stage(first![0]).id,
         ownerId: owner?.id ?? null,
-        leadSource: source,
+        leadSource: normalizeLeadSource(source),
+        leadType: source === "Inbound" ? "inbound" : "outbound",
+        leadDate: at(first![1]),
         serviceType: service,
         expectedClose: end.category === "open" ? new Date(Date.UTC(2026, 10 + (i % 3), 5 + i)) : null,
         createdAt: at(first![1]),

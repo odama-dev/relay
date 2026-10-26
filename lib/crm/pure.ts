@@ -99,3 +99,26 @@ export function valueSort(type: CrmAttributeType, options: CrmOption[], v: CrmVa
 
 /** A new option id, short and stable (labels can be renamed). */
 export const newOptionId = () => Math.random().toString(36).slice(2, 10);
+
+export type ConnectionStrength = "very_strong" | "strong" | "weak" | "none";
+
+export const CONNECTION_LABELS: Record<ConnectionStrength, string> = { very_strong: "Very strong", strong: "Strong", weak: "Weak", none: "No connection" };
+
+const DAY = 86_400_000;
+
+/**
+ * How well the team knows someone, from the email with them: a two-way
+ * thread in the last 30 days and 6+ emails in 90 → very strong; a two-way
+ * thread in 90 days, or 3+ emails → strong; any email in a year → weak.
+ */
+export function connectionStrength(mail: { sentAt: string; direction: "inbound" | "outbound" }[], now: Date): ConnectionStrength {
+  const age = (m: { sentAt: string }) => (now.getTime() - new Date(m.sentAt).getTime()) / DAY;
+  const within = (days: number) => mail.filter((m) => age(m) <= days);
+  const twoWay = (list: typeof mail) => list.some((m) => m.direction === "inbound") && list.some((m) => m.direction === "outbound");
+  const d30 = within(30);
+  const d90 = within(90);
+  if (twoWay(d30) && d90.length >= 6) return "very_strong";
+  if (twoWay(d90) || d90.length >= 3) return "strong";
+  if (within(365).length > 0) return "weak";
+  return "none";
+}

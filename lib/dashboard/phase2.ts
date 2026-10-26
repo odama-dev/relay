@@ -252,7 +252,7 @@ export async function loadStudioOkr(user: CurrentUser) {
 
 /** Sales module: the pipeline's top figures and the open deals that need a nudge. */
 export async function loadPipelineWidget(user: CurrentUser) {
-  const data = await loadPipeline(user, { closed: "recent" });
+  const data = await loadPipeline(user, {});
   const open = data.deals.filter((d) => d.category === "open");
   const attention = open
     .filter((d) => d.stale || (d.expectedClose !== null && d.expectedClose <= addDays(data.today, 14)))

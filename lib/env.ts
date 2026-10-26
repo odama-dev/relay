@@ -16,6 +16,8 @@ export const env = {
   slackBotToken: process.env.SLACK_BOT_TOKEN ?? "",
   xenditSecretKey: process.env.XENDIT_SECRET_KEY ?? "",
   xenditCallbackToken: process.env.XENDIT_CALLBACK_TOKEN ?? "",
+  /** 32 random bytes, base64 — encrypts the mailbox passwords people connect (Mail). */
+  mailEncryptionKey: process.env.MAIL_ENCRYPTION_KEY ?? "",
   /** Bearer token the scheduler (Vercel Cron or the VPS cron) presents to /api/cron/*. */
   cronSecret: process.env.CRON_SECRET ?? "",
 };

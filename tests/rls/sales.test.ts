@@ -49,31 +49,33 @@ describe("Pipeline", () => {
   let dealId: string;
 
   it("shows the pipeline to Sales and Studio Report only", async () => {
-    expect(await as("sales", (tx) => tx.pipelineStage.count())).toBe(6);
-    expect(await as("boss", (tx) => tx.pipelineStage.count())).toBe(6);
+    expect(await as("sales", (tx) => tx.pipelineStage.count())).toBe(7);
+    expect(await as("boss", (tx) => tx.pipelineStage.count())).toBe(7);
     expect(await as("dev", (tx) => tx.pipelineStage.count())).toBe(0);
     expect(await as("fin", (tx) => tx.pipelineStage.count())).toBe(0);
-    await denied(as("dev", async (tx) => tx.deal.create({ data: { title: "Nope", prospectName: "X", value: 1, stageId: await stage("Lead") } })));
+    await denied(as("dev", async (tx) => tx.deal.create({ data: { title: "Nope", prospectName: "X", value: 1, stageId: await stage("Researched") } })));
   });
 
   it("records every stage entry and takes the stage's probability", async () => {
-    const d = await as("sales", async (tx) => tx.deal.create({ data: { title: "Website", prospectName: "Newco", value: 100_000_000, probability: 10, stageId: await stage("Lead") } }));
+    const d = await as("sales", async (tx) => tx.deal.create({ data: { title: "Website", prospectName: "Newco", value: 100_000_000, probability: 10, stageId: await stage("Researched") } }));
     dealId = d.id;
     expect(d.createdBy).toBe(ids.sales);
-    const moved = await as("sales", async (tx) => tx.deal.update({ where: { id: dealId }, data: { stageId: await stage("Qualified") } }));
-    expect(moved.probability).toBe(25);
+    const moved = await as("sales", async (tx) => tx.deal.update({ where: { id: dealId }, data: { stageId: await stage("Contacted") } }));
+    expect(moved.probability).toBe(15);
     const history = await prisma.dealStageHistory.findMany({ where: { dealId }, orderBy: { changedAt: "asc" } });
     expect(history).toHaveLength(2);
     expect(history[1]!.changedBy).toBe(ids.sales);
     await denied(as("sales", async (tx) => tx.dealStageHistory.create({ data: { dealId, toStageId: await stage("Won"), value: 1, currency: "IDR" } })));
   });
 
-  it("needs a reason to lose a deal, and closes it", async () => {
-    expect(await denied(as("sales", async (tx) => tx.deal.update({ where: { id: dealId }, data: { stageId: await stage("Lost") } })))).toMatch(/why/);
+  it("closes a lost deal, with or without a reason", async () => {
+    const bare = await as("sales", async (tx) => tx.deal.update({ where: { id: dealId }, data: { stageId: await stage("Lost") } }));
+    expect(bare.lostReason).toBeNull();
+    await as("sales", async (tx) => tx.deal.update({ where: { id: dealId }, data: { stageId: await stage("Proposal") } }));
     const lost = await as("sales", async (tx) => tx.deal.update({ where: { id: dealId }, data: { stageId: await stage("Lost"), lostReason: "Budget" } }));
     expect(lost.probability).toBe(0);
     expect(lost.closedAt).not.toBeNull();
-    const reopened = await as("sales", async (tx) => tx.deal.update({ where: { id: dealId }, data: { stageId: await stage("Negotiation") } }));
+    const reopened = await as("sales", async (tx) => tx.deal.update({ where: { id: dealId }, data: { stageId: await stage("Proposal") } }));
     expect(reopened.closedAt).toBeNull();
     expect(reopened.lostReason).toBeNull();
   });
@@ -90,7 +92,7 @@ describe("Pipeline", () => {
   it("keeps stages with deals, and one stage per category", async () => {
     expect(await denied(as("sales", async (tx) => tx.pipelineStage.delete({ where: { id: await stage("Won") } })))).toMatch(/Move this stage/);
     expect(await denied(as("sales", async (tx) => tx.pipelineStage.delete({ where: { id: await stage("Lost") } })))).toMatch(/at least one Lost/);
-    await as("sales", async (tx) => tx.pipelineStage.delete({ where: { id: await stage("Lead") } }));
+    await as("sales", async (tx) => tx.pipelineStage.delete({ where: { id: await stage("Researched") } }));
     await denied(as("boss", async (tx) => tx.pipelineStage.create({ data: { name: "Nope", category: "open", probability: 120 } })));
   });
 });

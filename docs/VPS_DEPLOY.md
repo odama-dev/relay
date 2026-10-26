@@ -113,6 +113,7 @@ SLACK_BOT_TOKEN="xoxb-..."
 XENDIT_SECRET_KEY="xnd_development_... (staging) / xnd_production_... (production)"
 XENDIT_CALLBACK_TOKEN="<sama dengan Callback verification token di dashboard Xendit>"
 CRON_SECRET="<openssl rand -hex 32>"
+MAIL_ENCRYPTION_KEY="<openssl rand -base64 32>"  # password mailbox IMAP/SMTP; jangan diganti setelah ada mailbox
 ```
 
 - **Jangan** set `DEV_AUTH_BYPASS` di server.
@@ -206,6 +207,7 @@ AUTH="Authorization: Bearer <CRON_SECRET>"
 20 * * * *   curl -fsS -H "$AUTH" $APP/review-sla         >/dev/null
 0 1 1 * *    curl -fsS -H "$AUTH" $APP/kpi-snapshot       >/dev/null
 55 23 * * *  curl -fsS -H "$AUTH" $APP/pipeline-snapshot  >/dev/null
+*/10 * * * * curl -fsS -H "$AUTH" $APP/mail-sync          >/dev/null
 0 2 * * *    set -a; . /home/odama/odama-os/.env; BACKUP_REMOTE=r2:odama-backups /home/odama/odama-os/scripts/backup.sh >> /home/odama/backup.log 2>&1
 ```
 

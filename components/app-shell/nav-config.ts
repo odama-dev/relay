@@ -29,7 +29,8 @@ export const navGroups: NavGroup[] = [
     label: "Work",
     items: [
       { label: "Projects", href: "/projects", icon: "projects", visible: (v) => v.role !== "sales" },
-      { label: "Clients", href: "/clients", icon: "clients", visible: (v) => perms.viewClients(v) && v.role !== "sales" },
+      { label: "Clients", href: "/clients", icon: "clients", visible: perms.viewClients },
+      { label: "Mail", href: "/mail", icon: "mail" },
       { label: "Project Health", href: "/health", icon: "health", visible: perms.viewHealthOverview },
       { label: "Approvals", href: "/approvals", icon: "approvals", visible: perms.reviewApprovals },
     ],

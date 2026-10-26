@@ -7,6 +7,7 @@ import { logActivity } from "@/lib/audit";
 import { perms } from "@/lib/roles";
 import { clientSchema, contactSchema, uuid } from "@/lib/validation";
 import type { Tx } from "@/lib/db";
+import { getClientRecord, type ClientRecord } from "@/lib/clients/record";
 
 const FORBIDDEN = "Only PMs, Sales and C-Level manage clients.";
 
@@ -131,4 +132,14 @@ export async function deleteContact(clientId: unknown, contactId: unknown): Prom
     if (res.count === 0) fail(FORBIDDEN);
     revalidateClient(cid);
   });
+}
+
+/** The client side panel's data (`?client=<id>`), read under RLS. */
+export async function loadClientRecord(clientId: unknown): Promise<ClientRecord> {
+  const user = await requireUser();
+  const id = uuid.safeParse(clientId);
+  if (!id.success || !perms.viewClients(user)) throw new Error("Client not found");
+  const record = await getClientRecord(user, id.data);
+  if (!record) throw new Error("Client not found");
+  return record;
 }

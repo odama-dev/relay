@@ -1,6 +1,7 @@
 "use client";
 
 import type { ClientDetail } from "@/lib/clients/queries";
+import type { ClientSalesView } from "@/lib/crm/queries";
 import { DataTable, type Column } from "@/components/data-table";
 import { StatusBadge, StatusDot } from "@/components/status-badge";
 import { MoneyText } from "@/components/money-text";
@@ -60,6 +61,50 @@ export function ClientInvoices({ invoices }: { invoices: InvoiceRow[] }) {
       getRowHref={(r) => `/invoices/${r.id}`}
       emptyTitle="No invoices yet"
       emptyDescription="Invoices are created from a client project."
+    />
+  );
+}
+
+type DealRow = ClientSalesView["deals"][number];
+type PersonRow = ClientSalesView["people"][number];
+
+/** The client's deals (Sales view); a row opens the deal on the pipeline. */
+export function ClientDeals({ deals }: { deals: DealRow[] }) {
+  const columns: Column<DealRow>[] = [
+    { id: "title", header: "Lead", primary: true, sortValue: (r) => r.title.toLowerCase(), cell: (r) => r.title },
+    { id: "stage", header: "Stage", sortValue: (r) => r.stage, cell: (r) => <StatusBadge value={r.category} label={r.stage} /> },
+    { id: "owner", header: "Owner", sortValue: (r) => r.owner?.name ?? "", cell: (r) => r.owner?.name ?? "—" },
+    { id: "person", header: "Person", sortValue: (r) => r.person?.name ?? "", cell: (r) => r.person?.name ?? "—" },
+    { id: "value", header: "Value", align: "right", sortValue: (r) => r.value, cell: (r) => <MoneyText value={r.value} currency={r.currency} /> },
+    { id: "lead", header: "Lead in", sortValue: (r) => r.leadDate, cell: (r) => <span className="tabular">{formatDate(r.leadDate)}</span> },
+    { id: "contact", header: "Last contact", sortValue: (r) => r.lastContactOn ?? "", cell: (r) => <span className="tabular">{r.lastContactOn ? formatDate(r.lastContactOn) : "—"}</span> },
+  ];
+  return (
+    <DataTable
+      columns={columns}
+      rows={deals}
+      getRowId={(r) => r.id}
+      getRowHref={(r) => `/sales?deal=${r.id}`}
+      emptyTitle="No deals yet"
+      emptyDescription="Deals linked to this client or its company show here."
+    />
+  );
+}
+
+/** People at the client's company or on its deals (Sales view). */
+export function ClientPeople({ people }: { people: PersonRow[] }) {
+  const columns: Column<PersonRow>[] = [
+    { id: "name", header: "Name", primary: true, sortValue: (r) => r.name.toLowerCase(), cell: (r) => r.name },
+    { id: "title", header: "Job title", sortValue: (r) => r.jobTitle ?? "", cell: (r) => r.jobTitle ?? "—" },
+    { id: "email", header: "Email", sortValue: (r) => r.email ?? "", cell: (r) => r.email ?? "—" },
+  ];
+  return (
+    <DataTable
+      columns={columns}
+      rows={people}
+      getRowId={(r) => r.id}
+      emptyTitle="No people yet"
+      emptyDescription="Add people at this company in Sales → People."
     />
   );
 }

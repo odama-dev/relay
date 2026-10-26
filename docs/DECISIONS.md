@@ -701,3 +701,75 @@ overdue / blocked / ownerless tasks.
   database or a separate staging project only (`docs/SUPABASE_SETUP.md` §6).
   Production RLS is trusted because the same migrations passed the suite
   locally and `pnpm cloud:status` confirms they were all applied.
+
+## Sales feedback, Oct 2026 (2026-10-26)
+
+- **Sales doesn't see health.** Health and Outstanding are gone from the
+  Sales dashboard; project lists hide the Health column for Sales and HR
+  (`perms.showHealth`). Supersedes "Clients hidden from Sales" above: Sales
+  now opens Clients, and a client opens as a sales record — deal stage,
+  owner, value and associated people on top, Notes as the first tab, then
+  Deals, Email, People, Billing contacts, Invoices. No Projects tab for Sales.
+- **Notes** (`crm_notes`) attach to a client, deal, company or person. The
+  Sales module writes, Studio Report reads; only the author edits or deletes.
+- **Deals** gain person / company (both optional, picked from the CRM by
+  search; the company's client becomes the deal's client), lead date, last
+  contact, lead type (inbound / outbound) and a fixed lead source list
+  (Dribbble, Website, Email, Contra, Behance, Referral / networking, Other;
+  CHECK constraint, old values normalised). Lost reason is optional.
+  **Last stage** is the last open stage before a deal closed — tracked by a
+  trigger, editable by hand. Stages Discovery call and Committed were added
+  for the report funnel; any stage can be **hidden** from the board and the
+  pickers (`is_hidden`) without losing deals in it.
+- **Pipeline filter** is a date range: open deals by lead date, won / lost by
+  close date. No range = all open deals + the last 30 days of closed ones.
+- **Report**: funnel Qualified → Discovery call → Won (a deal counts in
+  every step it reached, by its last stage), lead sources (leads vs won),
+  money won per month (IDR). The bridge-by-month table was removed; the
+  bridge chart stays with its month picker.
+- **Invoice status override.** The status is still derived; anyone who can
+  edit an issued invoice can set it by hand (not to Draft / Void — those stay
+  actions) and clear it to hand it back. The guard trigger applies the
+  override over any system recompute, and stamps who set it.
+- **Own tasks for every role.** Anyone can search all Active / On hold
+  projects (`app.search_projects`, no contract values) and add a task they
+  own; `app.join_project_for_task` adds them as a member first. Sales only
+  adds into the project's **Sales** section (created if missing — RLS
+  refuses other sections); everyone else gets the first section.
+- **New invoice is a form, not a generate.** Pick the project, then edit
+  bill-to (name, email, address), currency, items and requests; the PDF uses
+  the same invoice template.
+- **Mail: IMAP/SMTP, no OAuth.** Each person connects any number of
+  mailboxes on any domain (`mail_accounts`); the password is AES-256-GCM
+  encrypted with `MAIL_ENCRYPTION_KEY` and the column isn't selectable by
+  the app role. INBOX and Sent sync into `mail_messages` (first sync: 30
+  days; then by UID; max 200 per run) on open, on demand, and by the
+  `mail-sync` job (VPS every 10 min; Vercel Hobby daily). Mail links to a CRM
+  person by address or a company by domain (never webmail / your own domain).
+  Your mailbox is private; mail linked to the CRM is visible to the Sales
+  team on the client record unless you turn sharing off. Sending goes over
+  the mailbox's SMTP and is appended to its Sent folder. Only the system
+  writes messages.
+
+## Outreach pipeline and record panels (2026-10-26)
+
+- **Stages follow outreach**: Researched → Contacted → Replied → Call booked
+  → Proposal → Won / Lost (supersedes Lead / Qualified / Discovery call /
+  Committed / Proposal sent / Negotiation above). Old deals were remapped in
+  place (Lead → Researched, Qualified → Contacted, Discovery call → Call
+  booked, the rest → Proposal; custom open stages → Researched) without new
+  history rows; CSV imports still accept the old names.
+- **Contacted and Replied move by themselves** (`pipeline_stages.auto_key`,
+  set by the system only): `app.mail_advance_deals` runs after a mailbox
+  sync, after sending from the OS, and after a deal is linked to a person /
+  company. Email you sent to the deal's person or company (on or after its
+  lead date) → Contacted; email back from them → Replied; last contact
+  follows the newest email. Only forward — a deal already past the stage
+  stays put. Renaming the stages keeps the behaviour.
+- **Report funnel** is every visible open stage in order, then Closed won.
+- **Side panels** (`components/record-panel.tsx`): clients (`?client=`),
+  deals (`?deal=`) and people (`?person=`) open over their list — close, ↑ / ↓
+  (or j / k) through the list, drag the left edge to resize, widen. A person's
+  connection strength comes from email (`connectionStrength`,
+  `lib/crm/pure.ts`); there's no calendar data, so no "next meeting".
+- **Mail** sits under Work in the nav.

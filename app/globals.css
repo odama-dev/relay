@@ -36,6 +36,7 @@
   --color-chart-1: var(--chart-1);
   --color-chart-in: var(--chart-in);
   --color-chart-out: var(--chart-out);
+  --color-chart-forecast: var(--chart-forecast);
 
   --color-ring: var(--ring);
   --color-input: var(--input);
@@ -272,6 +273,8 @@
      falls red; the utilization ring is one blue in steps. */
   --chart-in: #0f6fff;
   --chart-out: #e7000b;
+  /* Expected (forecast) money: Odama orange in steps, apart from received blue. */
+  --chart-forecast: #f7721d;
 
   /* Overview trend chart (Figma 198:37): dashed grid, muted revenue fill,
      strong gross-profit line. */
@@ -392,6 +395,7 @@
 
   --chart-in: #4d8fff;
   --chart-out: #ff4d4f;
+  --chart-forecast: #ff8a3d;
 
   --overview-grid: #1b1b1c;
   --overview-line-muted: #292929;

@@ -22,7 +22,6 @@ import { InOutChart } from "@/components/in-out-chart";
 import { MoneyText } from "@/components/money-text";
 import { LinkButton } from "@/components/link-button";
 import { TextLink } from "@/components/text-link";
-import { Tooltip } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DataTableSkeleton } from "@/components/page-skeletons";
 import { SectionBody, idrCompact } from "./clevel/parts";
@@ -54,7 +53,7 @@ export function SalesDashboard({ user }: { user: CurrentUser }) {
           {(rows) => <MyInvoicesTable rows={rows} />}
         </SectionBody>
       </TableSection>
-      <TableSection title="Active clients" href="/clients" cols={5}>
+      <TableSection title="Active clients" href="/clients" cols={3}>
         <SectionBody title="Active clients" load={() => loadActiveClients(ctx)}>
           {(rows) => <ActiveClientsTable rows={rows} />}
         </SectionBody>
@@ -109,7 +108,6 @@ function MonthDelta({ current, previous }: { current: number | null; previous: n
 }
 
 function SummarySection({ s, drafts, uninvoiced }: { s: Summary; drafts: Drafts; uninvoiced: Uninvoiced }) {
-  const o = s.outstanding;
   const rateNote = s.rateDate ? `ECB reference rate, ${formatDate(s.rateDate)}` : "Exchange rates unavailable";
   return (
     <>
@@ -118,41 +116,6 @@ function SummarySection({ s, drafts, uninvoiced }: { s: Summary; drafts: Drafts;
         items={[
           { label: "Invoiced this month", values: [<Idr key="v" value={s.current.invoiced} />], delta: <MonthDelta current={s.current.invoiced} previous={s.previous.invoiced} /> },
           { label: "Collected this month", values: [<Idr key="v" value={s.current.collected} />], delta: <MonthDelta current={s.current.collected} previous={s.previous.collected} /> },
-          {
-            label: "Outstanding",
-            values: [
-              o.byCurrency.length > 0 ? (
-                <Tooltip
-                  key="v"
-                  side="bottom"
-                  className="px-2.5 py-2 [text-box:normal] supports-[text-box:trim-both]:py-2"
-                  content={
-                    <div className="flex flex-col gap-1">
-                      {o.byCurrency.map((m) => (
-                        <span key={m.currency} className="tabular">
-                          {formatMoney(m.amount, m.currency)}
-                        </span>
-                      ))}
-                      <span className="opacity-60">{rateNote}</span>
-                    </div>
-                  }
-                >
-                  <span tabIndex={0} className="cursor-default outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--focus-ring)]">
-                    {o.byCurrency.some((m) => m.currency !== "IDR") && "≈ "}
-                    {idrCompact(o.idr)}
-                  </span>
-                </Tooltip>
-              ) : (
-                <span key="v">{idrCompact(0)}</span>
-              ),
-            ],
-            delta: (
-              <span className="text-muted-foreground text-caption">
-                {o.invoices} open invoice{o.invoices === 1 ? "" : "s"}
-                {o.late > 0 && <span className="text-destructive"> · {o.late} late</span>}
-              </span>
-            ),
-          },
           {
             label: "Not yet invoiced",
             tone: s.uninvoiced ? "destructive" : "default",
@@ -246,7 +209,7 @@ function SummarySkeleton() {
   return (
     <>
       <div className="bleed flex border-b">
-        {Array.from({ length: 4 }).map((_, i) => (
+        {Array.from({ length: 3 }).map((_, i) => (
           <div key={i} className="flex flex-1 flex-col gap-2 px-6 py-4 first:pl-0">
             <Skeleton className="h-3 w-24" />
             <Skeleton className="h-6 w-28" />

@@ -117,10 +117,16 @@ export const perms = {
   viewBudget: (v: Viewer, isMember: boolean) =>
     is(v, "sales", "finance", "c_level") || (is(v, "pm", "designer_dev") && isMember),
   editBudget: (v: Viewer, isMember: boolean) => is(v, "c_level") || (is(v, "pm") && isMember),
+  /** Health in the UI — Sales works the pipeline and doesn't see delivery health. */
+  showHealth: (v: Viewer) => !is(v, "sales", "hr"),
 
   // Tasks (M2)
-  viewTasks: (v: Viewer) => is(v, "designer_dev", "pm", "sales", "c_level"),
-  createTasks: (v: Viewer) => is(v, "designer_dev", "pm", "c_level"),
+  /** Everyone keeps their own tasks (My Tasks) on projects they're on. */
+  viewTasks: (v: Viewer) => is(v, "designer_dev", "pm", "sales", "c_level", "finance", "hr"),
+  /** On the project board; Sales adds from My Tasks, into the project's "Sales" section. */
+  createTasks: (v: Viewer) => is(v, "designer_dev", "pm", "c_level", "finance", "hr"),
+  /** A task for yourself on any open project you find by search (you join it). */
+  createOwnTasks: (v: Viewer) => is(v, "designer_dev", "pm", "sales", "c_level", "finance", "hr"),
 
   // Time (M3/M4)
   /** Everyone logs time except C-Level, for whom it is optional (M3). */

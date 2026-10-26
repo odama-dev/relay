@@ -58,6 +58,8 @@ export function RecordsTable<R extends RecordRow>({
   columns,
   canEdit,
   actions,
+  onOpen,
+  openId,
 }: {
   object: "company" | "person";
   /** "company" / "person", for labels. */
@@ -68,6 +70,10 @@ export function RecordsTable<R extends RecordRow>({
   canEdit: boolean;
   /** Right of the search (e.g. "New person"). */
   actions?: ReactNode;
+  /** Opens a record's side panel: from its name, or a click on the row outside the editable cells. */
+  onOpen?: (row: R) => void;
+  /** The record whose panel is open, shown as selected. */
+  openId?: string | null;
 }) {
   const router = useRouter();
   const [q, setQ] = useState("");
@@ -137,7 +143,15 @@ export function RecordsTable<R extends RecordRow>({
       header: head(object === "company" ? "clients" : "user", noun === "company" ? "Company" : "Person"),
       primary: true,
       sortValue: (r) => r.name.toLowerCase(),
-      cell: (r) => <EditableCell kind="text" value={r.name} editable={canEdit} label={`name of ${r.name}`} onSave={save(r.id, "name")} />,
+      // With a panel, the name opens it (renaming moves into the panel's details).
+      cell: (r) =>
+        onOpen ? (
+          <button type="button" className="block max-w-full truncate text-left hover:underline" onClick={() => onOpen(r)}>
+            {r.name}
+          </button>
+        ) : (
+          <EditableCell kind="text" value={r.name} editable={canEdit} label={`name of ${r.name}`} onSave={save(r.id, "name")} />
+        ),
     },
     ...builtins.map(
       (b): Column<R> => ({
@@ -156,21 +170,18 @@ export function RecordsTable<R extends RecordRow>({
     ...columns.map(
       (c, i): Column<R> => ({
         id: c.id,
-        header: (
-          <span className="flex items-center justify-between gap-2">
-            <span title={CRM_TYPE_LABELS[c.type]}>{head(TYPE_ICON[c.type], c.name)}</span>
-            {canEdit && (
-              <RowActions
-                label={`${c.name} column`}
-                actions={[
-                  { label: "Edit column", icon: "edit", onSelect: () => setColumnDialog({ column: c }) },
-                  { label: "Move left", icon: "chevronLeft", hidden: i === 0, onSelect: () => void moveColumn(c.id, -1).then(() => router.refresh()) },
-                  { label: "Move right", icon: "chevronRight", hidden: i === columns.length - 1, onSelect: () => void moveColumn(c.id, 1).then(() => router.refresh()) },
-                  { label: "Remove column", icon: "archive", destructive: true, onSelect: () => setArchiveCol(c) },
-                ]}
-              />
-            )}
-          </span>
+        header: <span title={CRM_TYPE_LABELS[c.type]}>{head(TYPE_ICON[c.type], c.name)}</span>,
+        // Outside the sort button: a button can't hold another.
+        headerAction: canEdit && (
+          <RowActions
+            label={`${c.name} column`}
+            actions={[
+              { label: "Edit column", icon: "edit", onSelect: () => setColumnDialog({ column: c }) },
+              { label: "Move left", icon: "chevronLeft", hidden: i === 0, onSelect: () => void moveColumn(c.id, -1).then(() => router.refresh()) },
+              { label: "Move right", icon: "chevronRight", hidden: i === columns.length - 1, onSelect: () => void moveColumn(c.id, 1).then(() => router.refresh()) },
+              { label: "Remove column", icon: "archive", destructive: true, onSelect: () => setArchiveCol(c) },
+            ]}
+          />
         ),
         align: c.type === "number" || c.type === "currency" ? "right" : undefined,
         sortValue: (r) => valueSort(c.type, c.options, r.values[c.id] ?? null),
@@ -211,6 +222,8 @@ export function RecordsTable<R extends RecordRow>({
           columns={table}
           rows={filtered}
           getRowId={(r) => r.id}
+          onRowClick={onOpen}
+          isRowSelected={openId ? (r) => r.id === openId : undefined}
           pageSize={100}
           emptyTitle={q ? "Nothing matches" : `No ${noun === "company" ? "companies" : "people"} yet`}
           emptyDescription={q ? "Try another search." : `Add one with "New ${noun}".`}
